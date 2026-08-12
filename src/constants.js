@@ -17,6 +17,7 @@ export const DEFAULT_SETTINGS = Object.freeze({
     trigger: 'manual',
     narrationMode: 'full',
     contentTags: 'content',
+    miniPlayerVisible: true,
     theme: 'follow',
     activePresetId: 'p_default',
     apiPresets: [{

@@ -27,7 +27,7 @@ export function resolveVoice(segment, settings, cardKey = '') {
 }
 
 export function applyVoices(segments, settings, cardKey = '') {
-    return segments.map(segment => ({ ...segment, voiceId: resolveVoice(segment, settings, cardKey) }));
+    return segments.map(segment => ({ ...segment, voiceId: segment.voiceOverride || resolveVoice(segment, settings, cardKey) }));
 }
 
 export function clearRuntimeSpeakerMap() {
@@ -43,6 +43,11 @@ export function getNewSpeakers(segments, settings, cardKey = '') {
 export function bindSpeaker(settings, cardKey, speaker, voiceId) {
     settings.bindings ||= {};
     const binding = settings.bindings[cardKey] ||= { main: null, extras: [], narrator: '' };
+    if (binding.main?.speaker === speaker) {
+        binding.main.voiceId = voiceId;
+        sessionSpeakerMap.set(`${cardKey}::${speaker}`, voiceId);
+        return;
+    }
     const existing = binding.extras.find(item => item.speaker === speaker);
     if (existing) existing.voiceId = voiceId;
     else binding.extras.push({ speaker, voiceId });

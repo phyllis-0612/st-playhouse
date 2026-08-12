@@ -33,7 +33,12 @@
             <div id="ph_track_view" hidden>
                 <div id="ph_track_bar" class="ph-track" aria-hidden="true"></div>
                 <div class="ph-track-caption"><span id="ph_track_left"></span><span id="ph_track_right"></span></div>
+                <div id="ph_failed_actions" class="ph-failed-actions" hidden>
+                    <span id="ph_failed_summary"></span>
+                    <button id="ph_retry_failed" class="ph-btn ph-primary" type="button"><i class="fa-solid fa-rotate"></i> 重试全部失败段</button>
+                </div>
                 <div id="ph_cues" class="ph-cues" role="list"></div>
+                <div id="ph_cue_editor" class="ph-cue-editor" hidden aria-live="polite"></div>
                 <div id="ph_new_speaker" class="ph-new-speaker" hidden></div>
                 <div class="ph-row ph-read-actions">
                     <button id="ph_redirect" class="ph-btn" type="button">重新分轨</button>
@@ -102,6 +107,7 @@
                 <div class="ph-group-body">
                     <label class="ph-check"><input id="ph_enabled" type="checkbox"><span>开启梨园·PlayHouse</span></label>
                     <label class="ph-check"><input id="ph_auto" type="checkbox"><span>回复写完自动读<small>面板关着也会读；首次需点一下页面解锁声音</small></span></label>
+                    <label class="ph-check"><input id="ph_mini_player" type="checkbox"><span>显示底部迷你播放条<small>播放条关闭后，可回到这里重新开启</small></span></label>
                     <label class="ph-field"><span>默认模式</span><select id="ph_default_mode"><option value="full">旁白 + 台词</option><option value="dialogue">只读台词</option></select></label>
                     <label class="ph-field"><span>正文标签</span><input id="ph_content_tags" type="text" value="content" placeholder="content"></label>
                     <p class="ph-hint ph-content-tag-hint">只读取指定标签以内的正文，例如 &lt;content&gt;…&lt;/content&gt;。可用逗号填写多个候选；都找不到时停止朗读，不会读取整条消息。</p>
@@ -190,6 +196,7 @@
                 <li><b>指定正文：</b>默认只读取 &lt;content&gt;…&lt;/content&gt;；可在设置 → 朗读中自定义标签。找不到标签时不会回退读取整条消息。</li>
                 <li><b>开始朗读：</b>点 AI 消息右上角的梨园按钮，或在设置中打开自动朗读。</li>
                 <li><b>切旁白模式：</b>播放中可立即切换「旁白 + 台词 / 只读台词」，不会重新请求分轨或合成。</li>
+                <li><b>补救失败或换错音色：</b>失败段点「重试」，成功段点「调整」。可只重做一段，也可把当前消息中同一角色的全部台词换成新音色；这些操作不会重新调用分轨模型。</li>
             </ol>
             <h3>iPhone / iPad 必看</h3>
             <p>第一次使用时先点一下页面或播放按钮解锁声音。梨园使用单例 AudioContext 连播，不会逐段更换 audio 标签。切到后台、锁屏或来电后，Safari 可能暂停声音；回来后点「继续播放」。</p>
@@ -220,9 +227,11 @@
 </section>
 
 <div id="playhouse_player_bar" class="ph-player-bar" hidden>
-    <button id="ph_bar_open" type="button" title="打开梨园"><i class="fa-solid fa-masks-theater"></i></button>
-    <button id="ph_bar_play" type="button" title="播放 / 暂停"><i class="fa-solid fa-play"></i></button>
-    <button id="ph_bar_stop" type="button" title="停止"><i class="fa-solid fa-stop"></i></button>
+    <button id="ph_bar_open" type="button" title="打开梨园" aria-label="打开梨园"><i class="fa-solid fa-masks-theater"></i></button>
+    <button id="ph_bar_play" type="button" title="播放 / 暂停当前位置" aria-label="播放或暂停当前位置"><i class="fa-solid fa-play"></i></button>
+    <button id="ph_bar_restart" class="ph-bar-restart" type="button" title="本层从头播放" aria-label="本层从头播放"><i class="fa-solid fa-rotate-left"></i><span>本层</span></button>
+    <button id="ph_bar_stop" type="button" title="停止" aria-label="停止"><i class="fa-solid fa-stop"></i></button>
     <span id="ph_bar_status">梨园准备好了</span>
-    <button id="ph_bar_mode" type="button">旁白 + 台词</button>
+    <button id="ph_bar_mode" type="button" title="切换旁白模式">旁白 + 台词</button>
+    <button id="ph_bar_hide" type="button" title="隐藏迷你播放条" aria-label="隐藏迷你播放条"><i class="fa-solid fa-xmark"></i></button>
 </div>

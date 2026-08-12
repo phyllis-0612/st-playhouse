@@ -44,6 +44,16 @@ export class WebAudioPlayer extends EventTarget {
         this.emit('queue');
     }
 
+    replaceItems(items, { preserveCursor = true } = {}) {
+        const previousCursor = this.cursor;
+        this.stop();
+        this.items = items ?? [];
+        this.cursor = preserveCursor && this.isLegal(previousCursor) ? previousCursor : this.nextLegal(-1, 1);
+        this.state = this.items.length ? 'paused' : 'idle';
+        this.emit('queue');
+        this.emit('state');
+    }
+
     setMode(mode) {
         const previousIndex = this.cursor;
         const wasActive = this.state === 'playing' || this.state === 'loading';
