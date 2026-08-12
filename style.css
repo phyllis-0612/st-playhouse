@@ -96,12 +96,17 @@
 .ph-btn:hover, .ph-btn:active { background: rgb(127 127 127 / .18); }
 .ph-btn.ph-primary { border-color: var(--ph-accent); color: var(--ph-accent); background: rgb(201 162 39 / .08); }
 .ph-btn.ph-danger { color: #cf7256; }
+.ph-btn:disabled { cursor: wait; opacity: .55; }
+.ph-btn i { margin-right: 5px; }
+.ph-save { margin-top: 10px; }
 .ph-read-actions { margin-top: 13px; }
 .ph-read-actions .ph-btn { flex: 1; }
 
 .ph-field { display: block; margin: 0 0 13px; }
 .ph-field > span { display: flex; justify-content: space-between; margin-bottom: 5px; color: var(--ph-muted); font-size: 12px; }
 .ph-panel input:not([type="checkbox"]):not([type="range"]), .ph-panel select { width: 100%; min-height: var(--ph-tap); border: 1px solid var(--ph-border); border-radius: 6px; padding: 0 10px; background: rgb(0 0 0 / .16); color: var(--ph-fg); font: inherit; font-size: 13px; }
+.ph-panel input[type="file"] { height: auto; padding: 8px; line-height: 1.35; }
+.ph-panel input[type="file"]::file-selector-button { min-height: 34px; margin-right: 8px; border: 1px solid var(--ph-border); border-radius: 5px; background: rgb(127 127 127 / .12); color: var(--ph-fg); }
 .ph-panel input:focus, .ph-panel select:focus, .ph-panel button:focus-visible { outline: 2px solid var(--ph-accent); outline-offset: -1px; }
 .ph-panel input[type="range"] { width: 100%; accent-color: var(--ph-accent); }
 .ph-check { min-height: var(--ph-tap); display: flex; gap: 10px; align-items: flex-start; padding: 7px 0; cursor: pointer; }
@@ -109,6 +114,11 @@
 .ph-check small { display: block; color: var(--ph-muted); font-size: 11px; margin-top: 2px; }
 .ph-hint { color: var(--ph-muted); font-size: 11px; line-height: 1.55; }
 .ph-content-tag-hint { margin: -7px 0 13px; }
+.ph-consent { padding: 9px; border: 1px dashed var(--ph-accent); border-radius: 6px; background: rgb(201 162 39 / .07); }
+.ph-progress { min-height: 32px; padding: 7px 9px; border-radius: 6px; background: rgb(127 127 127 / .08); color: var(--ph-muted); font-size: 11px; line-height: 1.45; }
+.ph-progress[data-state="working"] { color: var(--ph-accent); }
+.ph-progress[data-state="success"] { color: #5eaa78; }
+.ph-progress[data-state="error"] { color: #cf7256; }
 .ph-signature-inline { display: block; margin-top: 9px; color: var(--SmartThemeEmColor); font-size: 11px; }
 .ph-grid-two, .ph-grid-three { display: grid; gap: 0 10px; }
 .ph-grid-two { grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -172,6 +182,7 @@
     .ph-grid-three { grid-template-columns: 1fr; }
     .ph-extra-row { display: grid; grid-template-columns: 1fr 1fr; }
     #ph_add_extra { grid-column: 1 / -1; }
+    .ph-row > .ph-btn { flex: 1; }
 }
 
 @media (max-width: 390px) {

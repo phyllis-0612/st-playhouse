@@ -5,6 +5,7 @@ import { directSegments, listModels } from './src/director.js';
 import { WebAudioPlayer } from './src/player.js';
 import { extractTaggedContent, parseContentTags, segmentText } from './src/segmenter.js';
 import { TtsService } from './src/tts.js';
+import { readAudioDuration, validateCloneFile, validateVoiceId, VoiceCloneService } from './src/voiceclone.js';
 import { applyVoices, bindSpeaker, clearRuntimeSpeakerMap, getNewSpeakers } from './src/voicebank.js';
 import { assertSecureUrl, clamp, escapeHtml, hashString, mergeDefaults } from './src/utils.js';
 
@@ -17,12 +18,25 @@ let currentSegments = [];
 let pipelineController = null;
 let previousPanelPage = 'read';
 let messageObserver = null;
+let cloneController = null;
 
 const $id = id => document.getElementById(id);
 const toast = (type, message, title = '梨园') => globalThis.toastr?.[type]?.(message, title) ?? console[type === 'error' ? 'error' : 'log'](`[${title}] ${message}`);
 
 function saveSettings() {
     context().saveSettingsDebounced?.();
+}
+
+function saved(label) {
+    saveSettings();
+    toast('success', `${label}已保存`);
+}
+
+function setCloneStatus(message, state = '') {
+    const node = $id('ph_clone_status');
+    if (!node) return;
+    node.textContent = message;
+    node.dataset.state = state;
 }
 
 function loadSettings() {
@@ -339,6 +353,34 @@ function renderVoiceBank() {
     $id('ph_pool_fields').innerHTML = Object.entries(labels).map(([key, label]) => `<label class="ph-pool-field"><span>${label}</span><select multiple data-pool="${key}">${settings.voiceBank.map(voice => `<option value="${escapeHtml(voice.voiceId)}" ${(settings.fuzzyPools?.[key] ?? []).includes(voice.voiceId) ? 'selected' : ''}>${escapeHtml(voice.label || voice.voiceId)}</option>`).join('')}</select></label>`).join('');
 }
 
+function modelOptions(preset) {
+    const fetched = settings.modelLists?.[preset.id] ?? [];
+    const models = [...new Set([preset.model, ...fetched].filter(Boolean))];
+    const options = models.map(model => `<option value="${escapeHtml(model)}">${escapeHtml(model)}</option>`).join('');
+    return `${options}<option value="__manual__">手动填写…</option>`;
+}
+
+function selectedDirectorModel() {
+    const select = $id('ph_director_model');
+    return select.value === '__manual__' ? $id('ph_director_model_custom').value.trim() : select.value.trim();
+}
+
+function renderDirectorModel(preset) {
+    const select = $id('ph_director_model');
+    const custom = $id('ph_director_model_custom');
+    const field = $id('ph_director_model_custom_field');
+    select.innerHTML = modelOptions(preset);
+    if (preset.model && [...select.options].some(option => option.value === preset.model)) {
+        select.value = preset.model;
+        custom.value = '';
+        field.hidden = true;
+    } else {
+        select.value = '__manual__';
+        custom.value = preset.model || '';
+        field.hidden = false;
+    }
+}
+
 function renderPreset() {
     $id('ph_preset').innerHTML = settings.apiPresets.map(item => `<option value="${escapeHtml(item.id)}">${escapeHtml(item.name)}</option>`).join('');
     $id('ph_preset').value = settings.activePresetId;
@@ -347,7 +389,7 @@ function renderPreset() {
     $id('ph_preset_name').value = preset.name;
     $id('ph_director_url').value = preset.baseUrl;
     $id('ph_director_key').value = preset.apiKey;
-    $id('ph_director_model').value = preset.model;
+    renderDirectorModel(preset);
     $id('ph_director_temp').value = preset.temperature;
     $id('ph_director_tokens').value = preset.maxTokens ?? '';
 }
@@ -389,7 +431,7 @@ function persistPresetForm() {
     preset.name = $id('ph_preset_name').value.trim() || preset.name;
     preset.baseUrl = $id('ph_director_url').value.trim();
     preset.apiKey = $id('ph_director_key').value.trim();
-    preset.model = $id('ph_director_model').value.trim();
+    preset.model = selectedDirectorModel();
     preset.temperature = clamp($id('ph_director_temp').value, 0, 2, 0);
     preset.maxTokens = $id('ph_director_tokens').value ? Math.max(1, Number($id('ph_director_tokens').value)) : null;
     renderPreset();
@@ -405,6 +447,41 @@ function persistTtsForm() {
     saveSettings();
 }
 
+function persistReadingForm() {
+    settings.enabled = $id('ph_enabled').checked;
+    settings.trigger = $id('ph_auto').checked ? 'auto' : 'manual';
+    settings.narrationMode = $id('ph_default_mode').value === 'dialogue' ? 'dialogue' : 'full';
+    settings.contentTags = parseContentTags($id('ph_content_tags').value).join(',');
+    settings.tts.globalSpeed = Number($id('ph_global_speed').value);
+    settings.gapMs.afterNarration = clamp($id('ph_gap_narration').value, 0, 3000, 300);
+    settings.gapMs.afterDialogue = clamp($id('ph_gap_dialogue').value, 0, 3000, 200);
+    settings.gapMs.speakerSwitch = clamp($id('ph_gap_speaker').value, 0, 3000, 250);
+    player.gaps = settings.gapMs;
+    player.setMode(settings.narrationMode);
+    currentSegments = [];
+    saveSettings();
+    renderSettings();
+    renderTarget();
+}
+
+function persistVoiceDefaults() {
+    settings.narratorVoiceId = $id('ph_narrator').value;
+    settings.fallbackVoiceId = $id('ph_fallback').value;
+    for (const select of $id('ph_pool_fields').querySelectorAll('[data-pool]')) {
+        settings.fuzzyPools[select.dataset.pool] = [...select.selectedOptions].map(option => option.value);
+    }
+    clearRuntimeSpeakerMap();
+    saveSettings();
+}
+
+function persistCacheForm() {
+    settings.cache.enabled = $id('ph_cache_enabled').checked;
+    settings.cache.maxMB = clamp($id('ph_cache_max').value, 10, 2000, 200);
+    cache.enabled = settings.cache.enabled;
+    cache.maxMB = settings.cache.maxMB;
+    saveSettings();
+}
+
 function saveBindingMain() {
     const cardKey = getCardKey();
     settings.bindings[cardKey] ||= { main: null, extras: [], narrator: '' };
@@ -416,13 +493,85 @@ function saveBindingMain() {
     saveSettings();
 }
 
+async function cloneVoiceFromForm() {
+    const file = $id('ph_clone_file').files?.[0];
+    const button = $id('ph_clone_voice');
+    if (!$id('ph_clone_consent').checked) return toast('warning', '请先确认已获得声音本人的许可');
+    let voiceId;
+    try {
+        voiceId = validateVoiceId($id('ph_clone_voice_id').value);
+        validateCloneFile(file);
+        if (settings.voiceBank.some(voice => voice.voiceId === voiceId)) throw new Error('这个 Voice ID 已经在音色库里');
+        persistTtsForm();
+        assertSecureUrl(settings.tts.baseUrl);
+    } catch (error) {
+        setCloneStatus(error.message, 'error');
+        return toast('error', error.message);
+    }
+    cloneController?.abort();
+    cloneController = new AbortController();
+    button.disabled = true;
+    button.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> 正在克隆…';
+    try {
+        const service = new VoiceCloneService(settings.tts);
+        const result = await service.create(file, {
+            voiceId,
+            noiseReduction: $id('ph_clone_denoise').checked,
+            volumeNormalization: $id('ph_clone_normalize').checked,
+        }, {
+            signal: cloneController.signal,
+            onProgress: message => setCloneStatus(message, 'working'),
+        });
+        const voice = {
+            voiceId: result.voiceId,
+            label: $id('ph_clone_label').value.trim() || result.voiceId,
+            gender: $id('ph_clone_gender').value,
+            ageTag: $id('ph_clone_age').value,
+            toneTag: $id('ph_clone_tone').value.trim() || 'unknown',
+            note: 'MiniMax 克隆音色',
+        };
+        settings.voiceBank.push(voice);
+        saveSettings();
+        let activated = false;
+        if ($id('ph_clone_activate').checked) {
+            setCloneStatus('音色创建成功，正在合成一句以激活…', 'working');
+            const tts = new TtsService(settings.tts, cache);
+            const sample = await tts.synthesizeSegment({ idx: 0, type: 'dialogue', speaker: voice.label, text: '你好，我是梨园新加入的声音。', voiceId, speed: 1, emotion: 'calm' });
+            if (sample.error) throw new Error(`音色已创建并入库，但激活试听失败：${sample.error}`);
+            activated = true;
+            currentSegments = [sample];
+            player.setQueue([sample], 'full');
+            renderPlayer();
+            await player.unlockFromGesture();
+            await player.play();
+        }
+        for (const id of ['ph_clone_voice_id', 'ph_clone_label', 'ph_clone_tone']) $id(id).value = '';
+        $id('ph_clone_file').value = '';
+        $id('ph_clone_consent').checked = false;
+        renderVoiceBank();
+        setCloneStatus(`“${voice.label}”已创建、加入音色库${activated ? '并激活' : ''}`, 'success');
+        toast('success', `音色 ${voice.voiceId} 已加入音色库`);
+    } catch (error) {
+        if (error.name !== 'AbortError') {
+            const alreadyCreated = settings.voiceBank.some(voice => voice.voiceId === voiceId);
+            const message = alreadyCreated ? `${error.message}；音色已保留在音色库，可稍后点试听完成激活` : error.message;
+            setCloneStatus(message, alreadyCreated ? 'success' : 'error');
+            renderVoiceBank();
+            toast(alreadyCreated ? 'warning' : 'error', message);
+        }
+    } finally {
+        button.disabled = false;
+        button.innerHTML = '<i class="fa-solid fa-microphone-lines"></i> 上传并克隆';
+    }
+}
+
 function addMessageButton(messageId) {
     const message = getMessage(messageId);
     const element = document.querySelector(`#chat .mes[mesid="${messageId}"]`);
     if (!message || message.is_user || message.is_system || !element || element.querySelector('.playhouse-message-button')) return;
     const button = document.createElement('div');
     button.className = 'mes_button playhouse-message-button fa-solid fa-masks-theater';
-    button.title = '梨园：分轨并朗读';
+    button.title = '梨园·PlayHouse：分轨并朗读';
     button.dataset.messageId = String(messageId);
     const buttons = element.querySelector('.mes_buttons');
     if (!buttons) return;
@@ -507,7 +656,13 @@ function bindEvents() {
     }
 
     $id('ph_preset').addEventListener('change', event => { settings.activePresetId = event.target.value; renderPreset(); saveSettings(); });
-    for (const id of ['ph_preset_name', 'ph_director_url', 'ph_director_key', 'ph_director_model', 'ph_director_temp', 'ph_director_tokens']) $id(id).addEventListener('change', persistPresetForm);
+    for (const id of ['ph_preset_name', 'ph_director_url', 'ph_director_key', 'ph_director_model_custom', 'ph_director_temp', 'ph_director_tokens']) $id(id).addEventListener('change', persistPresetForm);
+    $id('ph_director_model').addEventListener('change', event => {
+        const manual = event.target.value === '__manual__';
+        $id('ph_director_model_custom_field').hidden = !manual;
+        if (manual) $id('ph_director_model_custom').focus();
+        else persistPresetForm();
+    });
     $id('ph_preset_new').addEventListener('click', () => {
         const preset = { id: `p_${Date.now().toString(36)}`, name: '新预设', baseUrl: '', apiKey: '', model: '', temperature: 0, maxTokens: null };
         settings.apiPresets.push(preset); settings.activePresetId = preset.id; renderPreset(); $id('ph_preset_name').focus(); saveSettings();
@@ -526,7 +681,10 @@ function bindEvents() {
         persistPresetForm();
         try {
             const models = await listModels(activePreset());
-            $id('ph_model_list').innerHTML = models.map(model => `<option value="${escapeHtml(model)}"></option>`).join('');
+            settings.modelLists ||= {};
+            settings.modelLists[activePreset().id] = models;
+            renderDirectorModel(activePreset());
+            saveSettings();
             toast('success', `拉到 ${models.length} 个模型`);
         } catch (error) { toast('error', error.message); }
     });
@@ -549,9 +707,14 @@ function bindEvents() {
         currentSegments = [result]; player.setQueue([result], 'full'); renderPlayer(); await player.unlockFromGesture(); await player.play();
     });
 
+    $id('ph_save_reading').addEventListener('click', () => { persistReadingForm(); saved('朗读设置'); });
+    $id('ph_save_director').addEventListener('click', () => { persistPresetForm(); saved('分轨设置'); });
+    $id('ph_save_tts').addEventListener('click', () => { persistTtsForm(); saved('语音服务'); });
+
     $id('ph_main_speaker').addEventListener('change', saveBindingMain);
     $id('ph_main_voice').addEventListener('change', saveBindingMain);
     $id('ph_card_narrator').addEventListener('change', saveBindingMain);
+    $id('ph_save_bindings').addEventListener('click', () => { saveBindingMain(); saved('角色绑定'); });
     $id('ph_add_extra').addEventListener('click', () => {
         const speaker = $id('ph_extra_speaker').value.trim();
         const voiceId = $id('ph_extra_voice').value;
@@ -573,6 +736,23 @@ function bindEvents() {
         for (const id of ['ph_voice_id', 'ph_voice_label', 'ph_voice_tone', 'ph_voice_note']) $id(id).value = '';
         saveSettings(); renderSettings(); toast('success', '音色已加入');
     });
+    $id('ph_clone_file').addEventListener('change', async event => {
+        const file = event.target.files?.[0];
+        if (!file) return setCloneStatus('等待选择音频');
+        try {
+            validateCloneFile(file);
+            setCloneStatus(`正在读取 ${file.name}…`, 'working');
+            const duration = await readAudioDuration(file);
+            validateCloneFile(file, duration);
+            setCloneStatus(`${file.name} · ${(file.size / 1024 / 1024).toFixed(1)} MB${Number.isFinite(duration) ? ` · ${duration.toFixed(1)} 秒` : ''}`, 'success');
+        } catch (error) {
+            event.target.value = '';
+            setCloneStatus(error.message, 'error');
+            toast('error', error.message);
+        }
+    });
+    $id('ph_clone_choose_file').addEventListener('click', () => $id('ph_clone_file').click());
+    $id('ph_clone_voice').addEventListener('click', cloneVoiceFromForm);
     $id('ph_voice_list').addEventListener('click', async event => {
         const preview = event.target.closest('[data-preview-voice]');
         const remove = event.target.closest('[data-remove-voice]');
@@ -598,11 +778,20 @@ function bindEvents() {
         settings.fuzzyPools[select.dataset.pool] = [...select.selectedOptions].map(option => option.value);
         clearRuntimeSpeakerMap(); saveSettings();
     });
+    $id('ph_save_voice_defaults').addEventListener('click', () => { persistVoiceDefaults(); saved('自动分组池'); });
     $id('ph_narrator').addEventListener('change', event => { settings.narratorVoiceId = event.target.value; saveSettings(); });
     $id('ph_fallback').addEventListener('change', event => { settings.fallbackVoiceId = event.target.value; saveSettings(); });
     $id('ph_cache_enabled').addEventListener('change', async event => { settings.cache.enabled = event.target.checked; cache.enabled = settings.cache.enabled; if (cache.enabled && !cache.db) await cache.init(); await updateCacheUsage(); saveSettings(); });
     $id('ph_cache_max').addEventListener('change', event => { settings.cache.maxMB = clamp(event.target.value, 10, 2000, 200); cache.maxMB = settings.cache.maxMB; void cache.evict(); saveSettings(); });
     $id('ph_cache_clear').addEventListener('click', async () => { await cache.clear(); await updateCacheUsage(); toast('success', '缓存已清空'); });
+    $id('ph_save_defaults').addEventListener('click', async () => {
+        persistVoiceDefaults();
+        persistCacheForm();
+        if (cache.enabled && !cache.db) await cache.init();
+        await cache.evict();
+        await updateCacheUsage();
+        saved('旁白与缓存设置');
+    });
     $id('ph_export').addEventListener('click', exportSettings);
     $id('ph_import').addEventListener('click', () => $id('ph_import_file').click());
     $id('ph_import_file').addEventListener('change', importSettings);
@@ -675,7 +864,7 @@ async function mountUi() {
     document.body.insertAdjacentHTML('beforeend', panelHtml);
     $id('form_sheld')?.insertBefore($id('playhouse_player_bar'), $id('send_form'));
     const menu = $id('extensionsMenu');
-    if (menu && !$id('playhouse_wand_item')) menu.insertAdjacentHTML('afterbegin', '<div id="playhouse_wand_item" class="list-group-item flex-container flexGap5"><div class="extensionsMenuExtensionButton fa-solid fa-masks-theater"></div><span>梨园朗读</span></div>');
+    if (menu && !$id('playhouse_wand_item')) menu.insertAdjacentHTML('afterbegin', '<div id="playhouse_wand_item" class="list-group-item flex-container flexGap5"><div class="extensionsMenuExtensionButton fa-solid fa-masks-theater"></div><span>梨园·PlayHouse</span></div>');
     $id('playhouse_wand_item')?.addEventListener('click', () => openPanel('read'));
     $id('playhouse_open_panel_settings')?.addEventListener('click', () => openPanel('settings'));
 }
@@ -718,7 +907,7 @@ async function init() {
     renderPlayer();
     messageObserver = new MutationObserver(addAllMessageButtons);
     messageObserver.observe($id('chat'), { childList: true, subtree: true });
-    console.info('[梨园·PlayHouse] Phase 1 已加载');
+    console.info('[梨园·PlayHouse] v0.2.0 已加载');
 }
 
 jQuery(init);

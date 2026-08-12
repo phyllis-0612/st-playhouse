@@ -37,6 +37,7 @@ export const DEFAULT_SETTINGS = Object.freeze({
         concurrency: 3,
         globalSpeed: 1,
     },
+    modelLists: {},
     voiceBank: [
         { voiceId: 'Chinese (Mandarin)_Reliable_Executive', label: '沉稳高管', gender: 'male', ageTag: 'mature', toneTag: 'calm', note: 'MiniMax 官方音色' },
         { voiceId: 'Chinese (Mandarin)_News_Anchor', label: '新闻女声', gender: 'female', ageTag: 'mature', toneTag: 'calm', note: 'MiniMax 官方音色' },

@@ -4,6 +4,7 @@ import { normalizeDirectorResult } from './src/director.js';
 import { applyVoices, clearRuntimeSpeakerMap } from './src/voicebank.js';
 import { cloneDefaults, EMOTIONS } from './src/constants.js';
 import { buildTtsBody, buildTtsUrl } from './src/tts.js';
+import { buildCloneBody, buildCloneUrl, validateCloneFile, validateVoiceId } from './src/voiceclone.js';
 import { joinApiUrl } from './src/utils.js';
 
 const segmented = segmentText('夜色很静。*她抬起头。*「你好。」代码：```secret()``` ![图](x.png)');
@@ -48,5 +49,17 @@ assert.equal(ttsBody.audio_setting.format, 'mp3');
 assert.equal(ttsBody.audio_setting.sample_rate, 32000);
 assert.equal(ttsBody.voice_setting.emotion, 'calm');
 assert.ok(EMOTIONS.includes('whipser'));
+
+assert.equal(validateVoiceId('PlayHouse01'), 'PlayHouse01');
+assert.throws(() => validateVoiceId('1bad'), /Voice ID/);
+assert.throws(() => validateVoiceId('too_sh-'), /Voice ID/);
+assert.equal(validateCloneFile({ name: 'sample.m4a', size: 1024 }, 12).name, 'sample.m4a');
+assert.throws(() => validateCloneFile({ name: 'sample.aac', size: 1024 }, 12), /mp3/);
+assert.throws(() => validateCloneFile({ name: 'sample.wav', size: 1024 }, 4), /10 秒/);
+const cloneBody = buildCloneBody('12345678901234567890', { voiceId: 'PlayHouse01', noiseReduction: true, volumeNormalization: false });
+assert.match(cloneBody, /"file_id":12345678901234567890/);
+assert.equal(JSON.parse(cloneBody).voice_id, 'PlayHouse01');
+assert.equal(buildCloneUrl({ baseUrl: 'https://api.minimaxi.com', groupId: '' }, '/v1/files/upload'), 'https://api.minimaxi.com/v1/files/upload');
+assert.equal(buildCloneUrl({ baseUrl: 'https://old.example/v1', groupId: '42' }, '/v1/voice_clone'), 'https://old.example/v1/voice_clone?GroupId=42');
 
 console.log('梨园纯模块测试通过');

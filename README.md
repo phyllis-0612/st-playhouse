@@ -1,4 +1,4 @@
-# 梨园·PlayHouse（Phase 1）
+# 梨园·PlayHouse v0.2
 
 署名：克克姐&奶盖&鱼仔
 
@@ -12,18 +12,26 @@ SillyTavern 正文分轨朗读扩展。AI 消息生成结束后，本地先按�
 SillyTavern/public/scripts/extensions/third-party/st-playhouse/
 ```
 
-刷新酒馆。在扩展抽屉或魔法棒菜单打开「梨园朗读」。
+刷新酒馆。在扩展抽屉或魔法棒菜单打开「梨园·PlayHouse」。
 
 ## 初次配置
 
-1. 设置 → 朗读：确认正文标签。默认只读取 `<content>…</content>`；可用逗号填写多个自定义候选标签。
-2. 设置 → 分轨模型：填写 OpenAI 兼容 Base URL、API Key 和模型。
-3. 设置 → 语音服务：填写 MiniMax Base URL 和 API Key。现行 MiniMax 接口可不填 GroupId；旧中转要求时再填。
-4. 音色 → 音色库：手填官方或已经克隆好的 `voice_id`。
+1. 设置 → 朗读：确认正文标签，点击保存。默认只读取 `<content>…</content>`；可用逗号填写多个自定义候选标签。
+2. 设置 → 分轨模型：填写 OpenAI 兼容 Base URL、API Key，点击「拉取模型」后从下拉框选择并保存。也可选择「手动填写」。
+3. 设置 → 语音服务：填写 MiniMax Base URL 和 API Key，然后保存。现行 MiniMax 接口可不填 GroupId；旧中转要求时再填。
+4. 音色 → 音色库：手填官方/已有 `voice_id`，或直接上传录音克隆新音色。
 5. 选择全局旁白、兜底音色，并配置自动分组池。
 6. 给当前角色卡绑定主角、旁白和常驻配角音色。
 
-Phase 1 不提供音色克隆上传。
+## 音色克隆
+
+1. 先在「设置 → 语音服务」保存 MiniMax API Key。
+2. 在「音色 → 克隆新音色」选择 mp3、m4a 或 wav：时长 10 秒–5 分钟，大小不超过 20 MB。
+3. 自定义 Voice ID：8–256 位，必须以英文字母开头，可含字母、数字、`-`、`_`，结尾不能是 `-` 或 `_`。
+4. 确认已获得声音本人许可，再点击「上传并克隆」。成功后自动加入音色库。
+5. 建议保留「创建后立即合成一句以激活」。这会产生一次很短的 TTS 费用；克隆后 7 天内没有正式用于 TTS 的音色会被 MiniMax 删除。
+
+MiniMax 中国区的声音复刻要求账号完成个人或企业认证。克隆录音直接发送给用户自己配置的 MiniMax 接口，不经过梨园作者服务器。
 
 ## 正文标签安全边界
 
@@ -33,10 +41,11 @@ Phase 1 不提供音色克隆上传。
 
 - 分轨中转 `https://gcli.ggchan.dev/`：HTTPS、浏览器 CORS 预检与实际请求均通过；`gemini-2.5-flash-lite` 已从梨园设置面板真实返回分轨结果。该中转不接受 `max_tokens`，默认留空即可。
 - MiniMax 中国区 `https://api.minimaxi.com/v1/t2a_v2`：HTTPS，CORS 允许浏览器携带 `Authorization` 与 `Content-Type`；无需额外 SillyTavern 后端转发。现行接口的 `GroupId` 可留空。
+- MiniMax 中国区音色克隆 `/v1/files/upload` 与 `/v1/voice_clone`：HTTPS，浏览器 CORS 预检允许 `POST`、`Authorization` 与 `Content-Type`，可直接从梨园上传并复刻。
 
 ## emotion 枚举
 
-当前限定为：`happy`、`sad`、`angry`、`fearful`、`disgusted`、`surprised`、`calm`、`whipser`。最后一个拼写来自 MiniMax 官方接口枚举，保持原样；分轨模型返回其它值时按 `calm` 处理。`fluent` 只适用于部分新模型，Phase 1 为兼容默认的 `speech-02-hd` 暂不开放。
+当前限定为：`happy`、`sad`、`angry`、`fearful`、`disgusted`、`surprised`、`calm`、`whipser`。最后一个拼写来自 MiniMax 官方接口枚举，保持原样；分轨模型返回其它值时按 `calm` 处理。`fluent` 只适用于部分新模型，当前为兼容默认的 `speech-02-hd` 暂不开放。
 
 ## iOS / Safari
 
@@ -60,4 +69,4 @@ iOS Safari、无痕模式或长期不访问站点可能清理缓存，这是浏�
 
 - iOS 锁屏或切后台后播放可能暂停，无稳定锁屏控制。
 - 无法检测 iPhone/iPad 的硬件静音键状态。
-- Phase 1 不包含音色克隆上传、整章预生成、合并导出单文件、用户消息朗读。
+- 当前不包含整章预生成、合并导出单文件、用户消息朗读，也不提供 MiniMax 账号内音色删除功能。
