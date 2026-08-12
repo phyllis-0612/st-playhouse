@@ -1,0 +1,202 @@
+<section id="playhouse_panel" class="ph-panel" data-theme="follow" hidden aria-label="梨园面板">
+    <header class="ph-head">
+        <div class="ph-brand"><strong>梨园·PlayHouse</strong><small>克克姐&amp;奶盖&amp;鱼仔</small></div>
+        <button id="ph_help" class="ph-head-btn" type="button" title="使用说明" aria-label="使用说明"><i class="fa-solid fa-circle-question"></i><span>使用说明</span></button>
+        <button id="ph_theme" class="ph-head-btn ph-icon-only" type="button" title="切换日夜主题" aria-label="切换日夜主题"><i class="fa-solid fa-circle-half-stroke"></i></button>
+        <button id="ph_close" class="ph-head-btn ph-icon-only" type="button" title="关闭" aria-label="关闭">×</button>
+    </header>
+
+    <nav class="ph-tabs" aria-label="梨园页面">
+        <button type="button" data-page="read" aria-selected="true">朗读</button>
+        <button type="button" data-page="voices" aria-selected="false">音色</button>
+        <button type="button" data-page="settings" aria-selected="false">设置</button>
+    </nav>
+
+    <main class="ph-body">
+        <section class="ph-page" data-page="read">
+            <div class="ph-target">
+                <div class="ph-target-nav">
+                    <button id="ph_prev_message" type="button" aria-label="上一条消息">‹</button>
+                    <span id="ph_target_label">没有可朗读的消息</span>
+                    <button id="ph_next_message" type="button" aria-label="下一条消息">›</button>
+                </div>
+                <div class="ph-target-body">
+                    <strong id="ph_target_name">—</strong>
+                    <p id="ph_target_preview">打开一个聊天，然后选择 AI 消息。</p>
+                    <small id="ph_target_status">等待消息</small>
+                </div>
+            </div>
+            <div id="ph_empty" class="ph-empty">
+                <div>🎭</div>
+                这条还没分轨。<br>点下面的按钮，先看看它想怎么读。
+            </div>
+            <div id="ph_track_view" hidden>
+                <div id="ph_track_bar" class="ph-track" aria-hidden="true"></div>
+                <div class="ph-track-caption"><span id="ph_track_left"></span><span id="ph_track_right"></span></div>
+                <div id="ph_cues" class="ph-cues" role="list"></div>
+                <div id="ph_new_speaker" class="ph-new-speaker" hidden></div>
+                <div class="ph-row ph-read-actions">
+                    <button id="ph_redirect" class="ph-btn" type="button">重新分轨</button>
+                    <button id="ph_reread" class="ph-btn" type="button">整段重读</button>
+                </div>
+            </div>
+        </section>
+
+        <section class="ph-page" data-page="voices" hidden>
+            <h3>当前角色卡绑定</h3>
+            <div id="ph_binding_key" class="ph-hint">未选择角色卡</div>
+            <label class="ph-field"><span>主角色名</span><input id="ph_main_speaker" type="text" placeholder="例如：楚弥"></label>
+            <label class="ph-field"><span>主角色音色</span><select id="ph_main_voice"></select></label>
+            <label class="ph-field"><span>本卡旁白音色</span><select id="ph_card_narrator"></select></label>
+            <div class="ph-row ph-extra-row">
+                <input id="ph_extra_speaker" type="text" placeholder="常驻配角名">
+                <select id="ph_extra_voice"></select>
+                <button id="ph_add_extra" class="ph-btn" type="button">添加</button>
+            </div>
+            <div id="ph_extras" class="ph-list"></div>
+
+            <h3>音色库</h3>
+            <div id="ph_voice_list" class="ph-list"></div>
+            <details class="ph-group" id="ph_add_voice_group">
+                <summary>添加音色 <span>Phase 1 手填 voice_id</span></summary>
+                <div class="ph-group-body ph-grid-two">
+                    <label class="ph-field ph-span-two"><span>Voice ID</span><input id="ph_voice_id" type="text" autocomplete="off"></label>
+                    <label class="ph-field"><span>显示名</span><input id="ph_voice_label" type="text"></label>
+                    <label class="ph-field"><span>性别</span><select id="ph_voice_gender"><option value="unknown">未知</option><option value="female">女</option><option value="male">男</option></select></label>
+                    <label class="ph-field"><span>年龄</span><select id="ph_voice_age"><option value="unknown">未知</option><option value="young">青年</option><option value="mature">成熟</option><option value="child">儿童</option></select></label>
+                    <label class="ph-field"><span>音色标签</span><input id="ph_voice_tone" type="text" placeholder="冷、暖、清亮…"></label>
+                    <label class="ph-field ph-span-two"><span>备注</span><input id="ph_voice_note" type="text"></label>
+                    <button id="ph_add_voice" class="ph-btn ph-primary ph-span-two" type="button">加入音色库</button>
+                </div>
+            </details>
+
+            <h3>自动分组池</h3>
+            <p class="ph-hint">按住 Ctrl/Command 可多选。同一个名字用确定性 hash，永远挑中同一把嗓子。</p>
+            <div id="ph_pool_fields" class="ph-grid-two"></div>
+        </section>
+
+        <section class="ph-page" data-page="settings" hidden>
+            <details class="ph-group" open>
+                <summary>朗读 <span id="ph_read_summary">手动</span></summary>
+                <div class="ph-group-body">
+                    <label class="ph-check"><input id="ph_enabled" type="checkbox"><span>开启梨园朗读</span></label>
+                    <label class="ph-check"><input id="ph_auto" type="checkbox"><span>回复写完自动读<small>面板关着也会读；首次需点一下页面解锁声音</small></span></label>
+                    <label class="ph-field"><span>默认模式</span><select id="ph_default_mode"><option value="full">旁白 + 台词</option><option value="dialogue">只读台词</option></select></label>
+                    <label class="ph-field"><span>正文标签</span><input id="ph_content_tags" type="text" value="content" placeholder="content"></label>
+                    <p class="ph-hint ph-content-tag-hint">只读取指定标签以内的正文，例如 &lt;content&gt;…&lt;/content&gt;。可用逗号填写多个候选；都找不到时停止朗读，不会读取整条消息。</p>
+                    <label class="ph-field"><span>全局语速 <output id="ph_global_speed_out">1.00×</output></span><input id="ph_global_speed" type="range" min="0.7" max="1.3" step="0.05"></label>
+                    <div class="ph-grid-three">
+                        <label class="ph-field"><span>旁白后</span><input id="ph_gap_narration" type="number" min="0" max="3000" step="50"></label>
+                        <label class="ph-field"><span>台词后</span><input id="ph_gap_dialogue" type="number" min="0" max="3000" step="50"></label>
+                        <label class="ph-field"><span>换角色</span><input id="ph_gap_speaker" type="number" min="0" max="3000" step="50"></label>
+                    </div>
+                </div>
+            </details>
+
+            <details class="ph-group">
+                <summary>分轨模型 <span>OpenAI 兼容</span></summary>
+                <div class="ph-group-body">
+                    <label class="ph-field"><span>预设</span><select id="ph_preset"></select></label>
+                    <div class="ph-row ph-wrap">
+                        <button id="ph_preset_new" class="ph-btn" type="button">新建</button>
+                        <button id="ph_preset_copy" class="ph-btn" type="button">复制</button>
+                        <button id="ph_preset_rename" class="ph-btn" type="button">重命名</button>
+                        <button id="ph_preset_delete" class="ph-btn ph-danger" type="button">删除</button>
+                    </div>
+                    <label class="ph-field"><span>预设名</span><input id="ph_preset_name" type="text"></label>
+                    <label class="ph-field"><span>Base URL</span><input id="ph_director_url" type="url" inputmode="url" autocomplete="off"></label>
+                    <label class="ph-field"><span>API Key</span><input id="ph_director_key" type="password" autocomplete="new-password"></label>
+                    <label class="ph-field"><span>模型</span><input id="ph_director_model" type="text" list="ph_model_list" autocomplete="off"><datalist id="ph_model_list"></datalist></label>
+                    <div class="ph-grid-two">
+                        <label class="ph-field"><span>温度</span><input id="ph_director_temp" type="number" min="0" max="2" step="0.1"></label>
+                        <label class="ph-field"><span>最大 Token（可留空）</span><input id="ph_director_tokens" type="number" min="1" placeholder="不发送"></label>
+                    </div>
+                    <p class="ph-hint">部分中转不接受 max_tokens；留空时梨园不会发送该字段。</p>
+                    <div class="ph-row">
+                        <button id="ph_models" class="ph-btn" type="button">拉取模型</button>
+                        <button id="ph_director_test" class="ph-btn ph-primary" type="button">测试连接</button>
+                    </div>
+                </div>
+            </details>
+
+            <details class="ph-group">
+                <summary>语音服务 <span>MiniMax</span></summary>
+                <div class="ph-group-body">
+                    <label class="ph-field"><span>Base URL</span><input id="ph_tts_url" type="url" inputmode="url" autocomplete="off"></label>
+                    <label class="ph-field"><span>API Key</span><input id="ph_tts_key" type="password" autocomplete="new-password"></label>
+                    <label class="ph-field"><span>GroupId（新接口可留空）</span><input id="ph_tts_group" type="text" autocomplete="off"></label>
+                    <label class="ph-field"><span>模型</span><select id="ph_tts_model"><option>speech-2.8-hd</option><option>speech-2.8-turbo</option><option>speech-2.6-hd</option><option>speech-2.6-turbo</option><option>speech-02-hd</option><option>speech-02-turbo</option></select></label>
+                    <label class="ph-field"><span>并发数</span><input id="ph_concurrency" type="number" min="1" max="8"></label>
+                    <button id="ph_tts_test" class="ph-btn ph-primary ph-wide" type="button">试合成一句</button>
+                </div>
+            </details>
+
+            <details class="ph-group">
+                <summary>旁白、兜底与缓存 <span id="ph_cache_usage">—</span></summary>
+                <div class="ph-group-body">
+                    <label class="ph-field"><span>全局旁白音色</span><select id="ph_narrator"></select></label>
+                    <label class="ph-field"><span>兜底音色</span><select id="ph_fallback"></select></label>
+                    <label class="ph-check"><input id="ph_cache_enabled" type="checkbox"><span>缓存已经合成的句子<small>切模式和重播不会重复花钱</small></span></label>
+                    <label class="ph-field"><span>容量上限（MB）</span><input id="ph_cache_max" type="number" min="10" max="2000"></label>
+                    <button id="ph_cache_clear" class="ph-btn ph-danger ph-wide" type="button">清空音频缓存</button>
+                </div>
+            </details>
+
+            <details class="ph-group">
+                <summary>导入与分享 <span>密钥永不导出</span></summary>
+                <div class="ph-group-body">
+                    <div class="ph-row">
+                        <button id="ph_export" class="ph-btn" type="button">导出给朋友</button>
+                        <button id="ph_import" class="ph-btn" type="button">导入并合并</button>
+                        <input id="ph_import_file" type="file" accept="application/json,.json" hidden>
+                    </div>
+                    <p class="ph-hint">导出包会清空分轨和 MiniMax 的所有 API Key；音色库按 voice_id 去重合并。</p>
+                </div>
+            </details>
+        </section>
+
+        <section class="ph-page ph-guide" data-page="help" hidden>
+            <h2>梨园怎么用</h2>
+            <ol>
+                <li><b>填两个接口：</b>设置 → 分轨模型、语音服务。云酒馆必须使用 HTTPS。</li>
+                <li><b>录入音色：</b>音色页手填 MiniMax voice_id。Phase 1 不负责克隆上传。</li>
+                <li><b>绑定角色：</b>给当前角色卡的主角、旁白和常驻配角选音色；没绑定的新角色会从分组池确定性挑选。</li>
+                <li><b>指定正文：</b>默认只读取 &lt;content&gt;…&lt;/content&gt;；可在设置 → 朗读中自定义标签。找不到标签时不会回退读取整条消息。</li>
+                <li><b>开始朗读：</b>点 AI 消息右上角的梨园按钮，或在设置中打开自动朗读。</li>
+                <li><b>切旁白模式：</b>播放中可立即切换「旁白 + 台词 / 只读台词」，不会重新请求分轨或合成。</li>
+            </ol>
+            <h3>iPhone / iPad 必看</h3>
+            <p>第一次使用时先点一下页面或播放按钮解锁声音。梨园使用单例 AudioContext 连播，不会逐段更换 audio 标签。切到后台、锁屏或来电后，Safari 可能暂停声音；回来后点「继续播放」。</p>
+            <p>如果进度在走却没声音，请检查手机侧边静音键。网页无法检测硬件静音状态。</p>
+            <h3>缓存说明</h3>
+            <p>缓存失败不会妨碍朗读。iOS 无痕模式可能禁用 IndexedDB；普通 Safari 长期不访问站点也可能清理缓存。</p>
+            <h3>隐私与分享</h3>
+            <p>正文会发送到你配置的分轨接口和 MiniMax；导出配置不会包含任何 API Key。</p>
+            <button id="ph_help_back" class="ph-btn ph-primary ph-wide" type="button">返回梨园</button>
+        </section>
+    </main>
+
+    <footer id="ph_footer" class="ph-footer">
+        <div id="ph_unlock_hint" class="ph-unlock" hidden>点一下解锁声音 · 没声音？检查手机侧边静音键</div>
+        <div class="ph-now">
+            <button id="ph_play" type="button" aria-label="播放"><i class="fa-solid fa-play"></i></button>
+            <button id="ph_stop" type="button" aria-label="停止"><i class="fa-solid fa-stop"></i></button>
+            <button id="ph_previous" type="button" aria-label="上一段"><i class="fa-solid fa-backward-step"></i></button>
+            <button id="ph_next" type="button" aria-label="下一段"><i class="fa-solid fa-forward-step"></i></button>
+            <span id="ph_now_text">尚未开始</span><small id="ph_now_count">—/—</small>
+        </div>
+        <div class="ph-mode">
+            <button id="ph_mode_full" type="button" aria-pressed="true">旁白 + 台词</button>
+            <button id="ph_mode_dialogue" type="button" aria-pressed="false">只读台词</button>
+        </div>
+        <button id="ph_process" class="ph-btn ph-primary ph-wide" type="button">分轨并朗读</button>
+    </footer>
+</section>
+
+<div id="playhouse_player_bar" class="ph-player-bar" hidden>
+    <button id="ph_bar_open" type="button" title="打开梨园"><i class="fa-solid fa-masks-theater"></i></button>
+    <button id="ph_bar_play" type="button" title="播放 / 暂停"><i class="fa-solid fa-play"></i></button>
+    <button id="ph_bar_stop" type="button" title="停止"><i class="fa-solid fa-stop"></i></button>
+    <span id="ph_bar_status">梨园准备好了</span>
+    <button id="ph_bar_mode" type="button">旁白 + 台词</button>
+</div>

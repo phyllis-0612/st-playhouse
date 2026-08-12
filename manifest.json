@@ -1,0 +1,13 @@
+{
+  "display_name": "梨园·PlayHouse",
+  "loading_order": 120,
+  "requires": [],
+  "optional": [],
+  "js": "index.js",
+  "css": "style.css",
+  "author": "克克姐&奶盖&鱼仔",
+  "version": "0.1.1",
+  "homePage": "",
+  "auto_update": false,
+  "minimum_client_version": "1.14.0"
+}
