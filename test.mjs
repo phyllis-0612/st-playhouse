@@ -96,9 +96,10 @@ assert.equal(JSON.parse(cloneBody).voice_id, 'PlayHouse01');
 assert.equal(buildCloneUrl({ baseUrl: 'https://api.minimaxi.com', groupId: '' }, '/v1/files/upload'), 'https://api.minimaxi.com/v1/files/upload');
 assert.equal(buildCloneUrl({ baseUrl: 'https://old.example/v1', groupId: '42' }, '/v1/voice_clone'), 'https://old.example/v1/voice_clone?GroupId=42');
 
-const [indexSource, panelSource] = await Promise.all([
+const [indexSource, panelSource, styleSource] = await Promise.all([
     readFile(new URL('./index.js', import.meta.url), 'utf8'),
     readFile(new URL('./panel.html', import.meta.url), 'utf8'),
+    readFile(new URL('./style.css', import.meta.url), 'utf8'),
 ]);
 assert.match(indexSource, /!settings\.miniPlayerVisible/);
 assert.match(indexSource, /\['ph_reread', 'ph_bar_restart'\]/);
@@ -106,5 +107,10 @@ assert.match(indexSource, /ph_bar_hide.+hideMiniPlayer/);
 assert.match(panelSource, /id="ph_mini_player"/);
 assert.match(panelSource, /id="ph_bar_restart"[^>]+本层从头播放/);
 assert.match(panelSource, /id="ph_bar_hide"[^>]+隐藏迷你播放条/);
+assert.match(styleSource, /--ph-control-bg: #262320/);
+assert.match(styleSource, /--ph-control-fg: #f1ece8/);
+assert.match(styleSource, /background-color: var\(--ph-control-bg\) !important/);
+assert.match(styleSource, /-webkit-text-fill-color: var\(--ph-control-fg\)/);
+assert.match(styleSource, /input:-webkit-autofill/);
 
 console.log('梨园纯模块测试通过');
