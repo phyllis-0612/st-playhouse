@@ -190,20 +190,59 @@ function renderPlayer() {
     const item = player.items[player.cursor];
     const legal = player.items.map((value, index) => ({ value, index })).filter(({ value }) => player.mode === 'full' || value.type === 'dialogue');
     const position = legal.findIndex(entry => entry.index === player.cursor);
+    const preparing = player.state === 'preparing';
     const playing = player.state === 'playing' || player.state === 'loading';
-    const icon = playing ? 'fa-pause' : 'fa-play';
+    const icon = preparing ? 'fa-hourglass-half' : playing ? 'fa-pause' : 'fa-play';
     $id('ph_play').innerHTML = `<i class="fa-solid ${icon}"></i>`;
     $id('ph_bar_play').innerHTML = `<i class="fa-solid ${icon}"></i>`;
     $id('ph_now_text').textContent = item ? `${item.speaker || '旁白'} · ${item.text.slice(0, 24)}` : '尚未开始';
     $id('ph_now_count').textContent = position < 0 ? '—/—' : `${position + 1}/${legal.length}`;
-    $id('ph_bar_status').textContent = player.state === 'needs-gesture' ? '点播放以继续声音' : item ? `${item.speaker || '旁白'} · ${item.text.slice(0, 30)}` : '梨园准备好了';
-    $id('ph_unlock_hint').hidden = player.unlocked && player.state !== 'needs-gesture';
+    $id('ph_bar_status').textContent = preparing
+        ? '正在准备后台音轨…'
+        : player.backgroundEnabled && player.state === 'ready'
+            ? '后台音轨就绪 · 点播放后可锁屏'
+            : player.state === 'needs-gesture'
+                ? (player.backgroundEnabled ? '点播放开始后台播放' : '点播放以继续声音')
+                : item ? `${item.speaker || '旁白'} · ${item.text.slice(0, 30)}` : '梨园准备好了';
+    $id('ph_unlock_hint').textContent = player.backgroundEnabled
+        ? (preparing ? '正在准备单条后台音轨…' : '后台音轨已准备好 · 点播放后可锁屏')
+        : '点一下解锁声音 · 没声音？检查手机侧边静音键';
+    $id('ph_unlock_hint').hidden = player.backgroundEnabled
+        ? !['preparing', 'ready', 'needs-gesture'].includes(player.state)
+        : player.unlocked && player.state !== 'needs-gesture';
     $id('ph_mode_full').setAttribute('aria-pressed', String(player.mode === 'full'));
     $id('ph_mode_dialogue').setAttribute('aria-pressed', String(player.mode === 'dialogue'));
     $id('ph_bar_mode').textContent = player.mode === 'full' ? '旁白 + 台词' : '只读台词';
     $id('playhouse_player_bar').hidden = !settings.miniPlayerVisible || (!player.items.length && !getMessage());
     renderSegmentsIfPresent();
     highlightCurrentSegment();
+}
+
+function backgroundTrackMetadata() {
+    const message = getMessage();
+    return {
+        title: `${message?.name || '当前角色'} · 第 ${Math.max(1, targetMessageId + 1)} 层`,
+        artist: '梨园·PlayHouse',
+        album: '正文朗读',
+    };
+}
+
+async function prepareBackgroundForCurrent() {
+    if (!settings.backgroundPlayback || !player.items.length) return false;
+    try {
+        $id('ph_target_status').textContent = '正在准备后台音轨…';
+        const ready = await player.prepareBackground(backgroundTrackMetadata());
+        if (!ready) return false;
+        const failed = player.items.filter(item => item.error).length;
+        $id('ph_target_status').textContent = `后台音轨已就绪 · ${player.items.length - failed}/${player.items.length} 段 · 点播放后可锁屏`;
+        renderPlayer();
+        return true;
+    } catch (error) {
+        $id('ph_target_status').textContent = `后台音轨准备失败 · ${error.message}`;
+        toast('error', error.message);
+        renderPlayer();
+        return false;
+    }
 }
 
 function renderSegmentsIfPresent() {
@@ -311,6 +350,7 @@ async function processMessage(messageId, { forceDirector = false, autoPlay = tru
             ? `已就绪 · ${results.length - failed}/${results.length} 段 · ${failed} 段失败`
             : `已就绪 · ${results.length}/${results.length} 段`;
         renderPlayer();
+        if (settings.backgroundPlayback) await prepareBackgroundForCurrent();
         if (autoPlay) await player.play();
     } catch (error) {
         if (error.name === 'AbortError') return;
@@ -381,6 +421,7 @@ async function regenerateSegments(indices, { voiceId = '', reason = '重新合�
             ? `${reason}完成 · ${results.length - failures} 成功，${failures} 失败`
             : `${reason}完成 · ${results.length} 段成功`;
         renderPlayer();
+        if (settings.backgroundPlayback) await prepareBackgroundForCurrent();
         toast(failures ? 'warning' : 'success', failures ? `${failures} 段仍失败，可点失败段查看原因` : `${reason}成功`);
     } catch (error) {
         if (error.name !== 'AbortError') toast('error', error.message);
@@ -426,9 +467,17 @@ function setMode(mode) {
     player.setMode(settings.narrationMode);
     saveSettings();
     renderPlayer();
+    if (settings.backgroundPlayback && player.items.length) void prepareBackgroundForCurrent();
 }
 
 function playOrPause() {
+    if (player.state === 'preparing') return toast('info', '后台音轨还在准备，请稍等一下');
+    if (player.backgroundEnabled) {
+        if (player.state === 'playing' || player.state === 'loading') player.pause();
+        else if (player.items.length) void player.play();
+        else void processMessage(targetMessageId);
+        return;
+    }
     const resumed = player.unlockFromGesture();
     if (player.state === 'playing' || player.state === 'loading') player.pause();
     else if (player.items.length) void Promise.resolve(resumed).then(() => player.play());
@@ -436,6 +485,15 @@ function playOrPause() {
 }
 
 function replayFromStart() {
+    if (player.backgroundEnabled) {
+        if (player.items.length) {
+            const first = player.nextLegal(-1, 1);
+            if (first >= 0) void player.play(first);
+            return;
+        }
+        void processMessage(targetMessageId);
+        return;
+    }
     const resumed = player.unlockFromGesture();
     if (player.items.length) {
         const first = player.nextLegal(-1, 1);
@@ -561,6 +619,7 @@ function renderSettings() {
     $id('ph_enabled').checked = settings.enabled;
     $id('ph_auto').checked = settings.trigger === 'auto';
     $id('ph_mini_player').checked = settings.miniPlayerVisible;
+    $id('ph_background_playback').checked = settings.backgroundPlayback;
     $id('ph_default_mode').value = settings.narrationMode;
     $id('ph_content_tags').value = parseContentTags(settings.contentTags).join(', ');
     $id('ph_global_speed').value = settings.tts.globalSpeed;
@@ -613,19 +672,22 @@ function persistReadingForm() {
     settings.enabled = $id('ph_enabled').checked;
     settings.trigger = $id('ph_auto').checked ? 'auto' : 'manual';
     settings.miniPlayerVisible = $id('ph_mini_player').checked;
+    settings.backgroundPlayback = $id('ph_background_playback').checked;
     settings.narrationMode = $id('ph_default_mode').value === 'dialogue' ? 'dialogue' : 'full';
     settings.contentTags = parseContentTags($id('ph_content_tags').value).join(',');
     settings.tts.globalSpeed = Number($id('ph_global_speed').value);
     settings.gapMs.afterNarration = clamp($id('ph_gap_narration').value, 0, 3000, 300);
     settings.gapMs.afterDialogue = clamp($id('ph_gap_dialogue').value, 0, 3000, 200);
     settings.gapMs.speakerSwitch = clamp($id('ph_gap_speaker').value, 0, 3000, 250);
-    player.gaps = settings.gapMs;
+    player.setBackgroundEnabled(settings.backgroundPlayback);
+    player.setGaps(settings.gapMs);
     player.setMode(settings.narrationMode);
     currentSegments = [];
     saveSettings();
     renderSettings();
     renderPlayer();
     renderTarget();
+    if (settings.backgroundPlayback && player.items.length) void prepareBackgroundForCurrent();
 }
 
 function persistVoiceDefaults() {
@@ -749,7 +811,7 @@ function addAllMessageButtons() {
 
 function bindEvents() {
     document.addEventListener('pointerdown', () => {
-        if (!player.unlocked) player.unlockFromGesture();
+        if (!player.backgroundEnabled && !player.unlocked) player.unlockFromGesture();
     }, { capture: true, once: true });
 
     $id('ph_close').addEventListener('click', closePanel);
@@ -786,7 +848,10 @@ function bindEvents() {
         const action = event.target.closest('[data-cue-action]')?.dataset.cueAction;
         if (action === 'retry') return void regenerateSegments([index], { reason: `重试第 ${index + 1} 段` });
         if (action === 'edit') return openCueEditor(index);
-        if (!currentSegments[index]?.error) void player.play(index);
+        if (!currentSegments[index]?.error) {
+            if (player.backgroundEnabled && !player.backgroundTrack) return toast('info', '后台音轨还在准备，请稍等一下');
+            void player.play(index);
+        }
         else openCueEditor(index);
     });
     $id('ph_cues').addEventListener('keydown', event => {
@@ -832,18 +897,31 @@ function bindEvents() {
     $id('ph_enabled').addEventListener('change', event => { settings.enabled = event.target.checked; saveSettings(); });
     $id('ph_auto').addEventListener('change', event => { settings.trigger = event.target.checked ? 'auto' : 'manual'; renderSettings(); saveSettings(); });
     $id('ph_mini_player').addEventListener('change', event => { settings.miniPlayerVisible = event.target.checked; saveSettings(); renderPlayer(); });
+    $id('ph_background_playback').addEventListener('change', event => {
+        settings.backgroundPlayback = event.target.checked;
+        player.setBackgroundEnabled(settings.backgroundPlayback);
+        saveSettings();
+        renderPlayer();
+        if (settings.backgroundPlayback && player.items.length) void prepareBackgroundForCurrent();
+        else toast('info', settings.backgroundPlayback ? '后台播放已开启；当前楼层会先准备为连续音轨' : '已切回前台精确分段播放');
+    });
     $id('ph_default_mode').addEventListener('change', event => setMode(event.target.value));
     $id('ph_content_tags').addEventListener('change', event => {
         settings.contentTags = parseContentTags(event.target.value).join(',');
         event.target.value = parseContentTags(settings.contentTags).join(', ');
         currentSegments = [];
-        player.stop();
+        player.setQueue([], settings.narrationMode);
         saveSettings();
         renderTarget();
     });
     $id('ph_global_speed').addEventListener('input', event => { settings.tts.globalSpeed = Number(event.target.value); $id('ph_global_speed_out').textContent = `${Number(event.target.value).toFixed(2)}×`; saveSettings(); });
     for (const [id, key] of [['ph_gap_narration', 'afterNarration'], ['ph_gap_dialogue', 'afterDialogue'], ['ph_gap_speaker', 'speakerSwitch']]) {
-        $id(id).addEventListener('change', event => { settings.gapMs[key] = clamp(event.target.value, 0, 3000, settings.gapMs[key]); player.gaps = settings.gapMs; saveSettings(); });
+        $id(id).addEventListener('change', event => {
+            settings.gapMs[key] = clamp(event.target.value, 0, 3000, settings.gapMs[key]);
+            player.setGaps(settings.gapMs);
+            saveSettings();
+            if (settings.backgroundPlayback && player.items.length) void prepareBackgroundForCurrent();
+        });
     }
 
     $id('ph_preset').addEventListener('change', event => { settings.activePresetId = event.target.value; renderPreset(); saveSettings(); });
@@ -1030,6 +1108,7 @@ async function importSettings(event) {
         settings.enabled = incoming.enabled ?? settings.enabled;
         settings.trigger = incoming.trigger === 'auto' ? 'auto' : settings.trigger;
         settings.miniPlayerVisible = incoming.miniPlayerVisible ?? settings.miniPlayerVisible;
+        settings.backgroundPlayback = incoming.backgroundPlayback ?? settings.backgroundPlayback;
         settings.narrationMode = incoming.narrationMode === 'dialogue' ? 'dialogue' : settings.narrationMode;
         settings.contentTags = parseContentTags(incoming.contentTags ?? settings.contentTags).join(',');
         currentSegments = [];
@@ -1041,7 +1120,8 @@ async function importSettings(event) {
         settings.fuzzyPools = { ...settings.fuzzyPools, ...(incoming.fuzzyPools ?? {}) };
         if (incoming.narratorVoiceId) settings.narratorVoiceId = incoming.narratorVoiceId;
         if (incoming.fallbackVoiceId) settings.fallbackVoiceId = incoming.fallbackVoiceId;
-        player.gaps = settings.gapMs;
+        player.setBackgroundEnabled(settings.backgroundPlayback);
+        player.setGaps(settings.gapMs);
         player.setMode(settings.narrationMode);
         cache.enabled = settings.cache.enabled;
         cache.maxMB = settings.cache.maxMB;
@@ -1074,11 +1154,11 @@ function attachSillyTavernEvents() {
     ctx.eventSource.on(ctx.eventTypes.MESSAGE_EDITED, messageId => {
         const tracks = ctx.chatMetadata?.playhouse?.tracks;
         if (tracks) delete tracks[messageId];
-        if (Number(messageId) === targetMessageId) { regenerationController?.abort(); activeCueEditorIndex = -1; currentSegments = []; player.stop(); renderTarget(); }
+        if (Number(messageId) === targetMessageId) { regenerationController?.abort(); activeCueEditorIndex = -1; currentSegments = []; player.setQueue([], settings.narrationMode); renderTarget(); }
         ctx.saveMetadataDebounced?.();
     });
     ctx.eventSource.on(ctx.eventTypes.CHAT_CHANGED, () => {
-        pipelineController?.abort(); regenerationController?.abort(); activeCueEditorIndex = -1; player.stop(); clearRuntimeSpeakerMap(); currentSegments = []; targetMessageId = -1;
+        pipelineController?.abort(); regenerationController?.abort(); activeCueEditorIndex = -1; player.setQueue([], settings.narrationMode); clearRuntimeSpeakerMap(); currentSegments = []; targetMessageId = -1;
         setTimeout(() => { const ids = getAiMessageIds(); addAllMessageButtons(); setTarget(ids[ids.length - 1]); }, 0);
     });
 }
@@ -1090,6 +1170,7 @@ async function init() {
     await cache.init();
     player = new WebAudioPlayer(settings.gapMs);
     player.mode = settings.narrationMode;
+    player.setBackgroundEnabled(settings.backgroundPlayback);
     bindEvents();
     attachSillyTavernEvents();
     addAllMessageButtons();
@@ -1099,7 +1180,7 @@ async function init() {
     renderPlayer();
     messageObserver = new MutationObserver(addAllMessageButtons);
     messageObserver.observe($id('chat'), { childList: true, subtree: true });
-    console.info('[梨园·PlayHouse] v0.2.3 已加载');
+    console.info('[梨园·PlayHouse] v0.3.0 已加载');
 }
 
 jQuery(init);

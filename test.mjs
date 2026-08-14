@@ -7,6 +7,7 @@ import { buildTtsBody, buildTtsUrl, classifyTtsError, TtsService } from './src/t
 import { buildCloneBody, buildCloneUrl, validateCloneFile, validateVoiceId } from './src/voiceclone.js';
 import { joinApiUrl } from './src/utils.js';
 import { readFile } from 'node:fs/promises';
+import { audioBufferToMonoPcm16, buildBackgroundTrack, gapBetweenMs } from './src/background-audio.js';
 
 const segmented = segmentText('夜色很静。*她抬起头。*「你好。」代码：```secret()``` ![图](x.png)');
 assert.deepEqual(segmented.map(item => item.type), ['narration', 'dialogue', 'narration']);
@@ -37,6 +38,7 @@ assert.equal(directed[2].type, 'narration');
 
 const settings = cloneDefaults();
 assert.equal(settings.miniPlayerVisible, true);
+assert.equal(settings.backgroundPlayback, false);
 clearRuntimeSpeakerMap();
 const voices1 = applyVoices([{ type: 'dialogue', speaker: '沈砚', gender: 'male', ageTag: 'young' }], settings, 'card.png');
 clearRuntimeSpeakerMap();
@@ -96,6 +98,35 @@ assert.equal(JSON.parse(cloneBody).voice_id, 'PlayHouse01');
 assert.equal(buildCloneUrl({ baseUrl: 'https://api.minimaxi.com', groupId: '' }, '/v1/files/upload'), 'https://api.minimaxi.com/v1/files/upload');
 assert.equal(buildCloneUrl({ baseUrl: 'https://old.example/v1', groupId: '42' }, '/v1/voice_clone'), 'https://old.example/v1/voice_clone?GroupId=42');
 
+const fakeAudioBuffer = values => ({
+    sampleRate: 1000,
+    numberOfChannels: 1,
+    length: values.length,
+    getChannelData: () => Float32Array.from(values),
+});
+const pcm = audioBufferToMonoPcm16(fakeAudioBuffer([-1, -.5, 0, .5, 1]));
+assert.deepEqual([...pcm], [-32768, -16384, 0, 16384, 32767]);
+assert.equal(gapBetweenMs({ type: 'narration', speaker: '' }, { type: 'dialogue', speaker: '甲' }, { afterNarration: 300, speakerSwitch: 250 }), 550);
+assert.equal(gapBetweenMs({ type: 'dialogue', speaker: '甲' }, { type: 'dialogue', speaker: '甲' }, { afterDialogue: 0, speakerSwitch: 250 }), 0);
+const backgroundItems = [
+    { type: 'narration', speaker: '', blob: new Blob(['n']) },
+    { type: 'dialogue', speaker: '甲', blob: new Blob(['d']) },
+];
+const backgroundTrack = await buildBackgroundTrack(backgroundItems, {
+    gaps: { afterNarration: 300, afterDialogue: 200, speakerSwitch: 250 },
+    decode: async () => fakeAudioBuffer(Array(100).fill(.25)),
+});
+assert.equal(backgroundTrack.cues.length, 2);
+assert.equal(backgroundTrack.cues[1].start, .65);
+assert.equal(backgroundTrack.duration, .75);
+assert.equal(backgroundTrack.blob.size, 1544);
+assert.equal(new TextDecoder().decode((await backgroundTrack.blob.arrayBuffer()).slice(0, 4)), 'RIFF');
+const dialogueBackground = await buildBackgroundTrack(backgroundItems, {
+    mode: 'dialogue',
+    decode: async () => fakeAudioBuffer(Array(100).fill(.25)),
+});
+assert.deepEqual(dialogueBackground.cues.map(cue => cue.index), [1]);
+
 const [indexSource, panelSource, styleSource] = await Promise.all([
     readFile(new URL('./index.js', import.meta.url), 'utf8'),
     readFile(new URL('./panel.html', import.meta.url), 'utf8'),
@@ -104,7 +135,9 @@ const [indexSource, panelSource, styleSource] = await Promise.all([
 assert.match(indexSource, /!settings\.miniPlayerVisible/);
 assert.match(indexSource, /\['ph_reread', 'ph_bar_restart'\]/);
 assert.match(indexSource, /ph_bar_hide.+hideMiniPlayer/);
+assert.match(indexSource, /prepareBackgroundForCurrent/);
 assert.match(panelSource, /id="ph_mini_player"/);
+assert.match(panelSource, /id="ph_background_playback"/);
 assert.match(panelSource, /id="ph_bar_restart"[^>]+本层从头播放/);
 assert.match(panelSource, /id="ph_bar_hide"[^>]+隐藏迷你播放条/);
 assert.match(styleSource, /--ph-control-bg: #262320/);
