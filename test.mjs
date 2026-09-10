@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { extractTaggedContent, parseContentTags, segmentText } from './src/segmenter.js';
-import { normalizeDirectorResult } from './src/director.js';
+import { __test as directorTest, directSegments, normalizeDirectorResult } from './src/director.js';
 import { applyVoices, clearRuntimeSpeakerMap } from './src/voicebank.js';
 import { cloneDefaults, EMOTIONS } from './src/constants.js';
 import { buildTtsBody, buildTtsUrl, classifyTtsError, TtsService } from './src/tts.js';
@@ -35,6 +35,36 @@ assert.equal(directed[0].speed, 1.3);
 assert.equal(directed[1].text, segmented[1].text);
 assert.equal(directed[1].emotion, 'angry');
 assert.equal(directed[2].type, 'narration');
+
+const duplicateDirectorOutput = '[{"idx":0,"type":"narration","speaker":"阿[甲]"}]\n[{"idx":0,"type":"dialogue","speaker":"错误副本"}]';
+assert.equal(directorTest.extractJsonArray(duplicateDirectorOutput)[0].speaker, '阿[甲]');
+assert.equal(directorTest.extractJsonArray('说明：[不是 JSON]\n```json\n[{"idx":0}]\n```')[0].idx, 0);
+assert.throws(() => directorTest.extractJsonArray('没有数组'), /没有返回 JSON 数组/);
+
+const originalFetch = globalThis.fetch;
+let directorCalls = 0;
+try {
+    globalThis.fetch = async (_url, options) => {
+        directorCalls++;
+        const request = JSON.parse(options.body);
+        if (directorCalls === 2) assert.match(request.messages[0].content, /严格格式模式/);
+        const content = directorCalls === 1 ? '格式错误' : '[{"idx":0,"type":"narration","speaker":null,"emotion":"calm","speed":1}]';
+        return new Response(JSON.stringify({ choices: [{ message: { content } }] }), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+        });
+    };
+    const retriedDirector = await directSegments([{ idx: 0, type: 'narration', text: '夜色。' }], {
+        apiKey: 'test-key',
+        baseUrl: 'https://example.com',
+        model: 'flash-test',
+        temperature: 0,
+    });
+    assert.equal(directorCalls, 2);
+    assert.equal(retriedDirector[0].type, 'narration');
+} finally {
+    globalThis.fetch = originalFetch;
+}
 
 const settings = cloneDefaults();
 assert.equal(settings.miniPlayerVisible, true);

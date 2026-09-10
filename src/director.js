@@ -5,14 +5,47 @@ const ALLOWED_GENDERS = new Set(['male', 'female', 'unknown']);
 const ALLOWED_AGES = new Set(['young', 'mature', 'child', 'unknown']);
 const ALLOWED_TONES = new Set(['clear', 'warm', 'cold', 'calm', 'deep', 'bright', 'soft', 'unknown']);
 
+class DirectorFormatError extends Error {
+    constructor(message = '分轨模型返回格式异常') {
+        super(message);
+        this.name = 'DirectorFormatError';
+    }
+}
+
+function findArrayEnd(text, start) {
+    let depth = 0;
+    let inString = false;
+    let escaped = false;
+    for (let index = start; index < text.length; index++) {
+        const char = text[index];
+        if (inString) {
+            if (escaped) escaped = false;
+            else if (char === '\\') escaped = true;
+            else if (char === '"') inString = false;
+            continue;
+        }
+        if (char === '"') inString = true;
+        else if (char === '[') depth++;
+        else if (char === ']' && --depth === 0) return index;
+    }
+    return -1;
+}
+
 function extractJsonArray(value) {
-    const text = String(value ?? '').trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '');
-    const start = text.indexOf('[');
-    const end = text.lastIndexOf(']');
-    if (start < 0 || end < start) throw new Error('分轨模型没有返回 JSON 数组');
-    const parsed = JSON.parse(text.slice(start, end + 1));
-    if (!Array.isArray(parsed)) throw new Error('分轨结果不是数组');
-    return parsed;
+    const text = String(value ?? '').trim();
+    let sawArray = false;
+    for (let start = text.indexOf('['); start >= 0; start = text.indexOf('[', start + 1)) {
+        const end = findArrayEnd(text, start);
+        if (end < 0) continue;
+        sawArray = true;
+        try {
+            const parsed = JSON.parse(text.slice(start, end + 1));
+            if (Array.isArray(parsed)) return parsed;
+        } catch { /* Try the next complete array in the response. */ }
+    }
+    throw new DirectorFormatError(sawArray
+        ? '分轨模型返回格式异常：没有找到可解析的 JSON 数组'
+        : '分轨模型没有返回 JSON 数组');
 }
 
 export function normalizeDirectorResult(localSegments, raw) {
@@ -47,15 +80,20 @@ function directorPrompt(knownSpeakers) {
     ].join('\n');
 }
 
-export async function directSegments(segments, preset, knownSpeakers = [], { signal } = {}) {
-    if (!preset?.apiKey || !preset?.baseUrl || !preset?.model) throw new Error('请先完整填写分轨 API 预设');
-    const url = joinApiUrl(preset.baseUrl, '/v1/chat/completions');
+async function requestDirector(segments, preset, knownSpeakers, url, signal, repair = false) {
+    const messages = [
+        {
+            role: 'system',
+            content: [
+                directorPrompt(knownSpeakers),
+                repair ? '严格格式模式：只输出一份完整 JSON 数组。不要重复数组，不要代码围栏，不要解释或前后缀。' : '',
+            ].filter(Boolean).join('\n'),
+        },
+        { role: 'user', content: JSON.stringify(segments.map(({ idx, text }) => ({ idx, text }))) },
+    ];
     const body = {
         model: preset.model,
-        messages: [
-            { role: 'system', content: directorPrompt(knownSpeakers) },
-            { role: 'user', content: JSON.stringify(segments.map(({ idx, text }) => ({ idx, text }))) },
-        ],
+        messages,
         temperature: clamp(preset.temperature, 0, 2, 0),
     };
     if (Number.isFinite(Number(preset.maxTokens)) && Number(preset.maxTokens) > 0) body.max_tokens = Number(preset.maxTokens);
@@ -67,8 +105,28 @@ export async function directSegments(segments, preset, knownSpeakers = [], { sig
     });
     const payload = await response.json().catch(() => null);
     if (!response.ok) throw new Error(payload?.error?.message || `分轨接口 HTTP ${response.status}`);
-    const content = payload?.choices?.[0]?.message?.content;
-    return normalizeDirectorResult(segments, content);
+    return payload?.choices?.[0]?.message?.content;
+}
+
+export async function directSegments(segments, preset, knownSpeakers = [], { signal } = {}) {
+    if (!preset?.apiKey || !preset?.baseUrl || !preset?.model) throw new Error('请先完整填写分轨 API 预设');
+    const url = joinApiUrl(preset.baseUrl, '/v1/chat/completions');
+    const content = await requestDirector(segments, preset, knownSpeakers, url, signal);
+    try {
+        return normalizeDirectorResult(segments, content);
+    } catch (error) {
+        if (!(error instanceof DirectorFormatError)) throw error;
+        console.warn('[梨园] 分轨模型返回格式异常，正在自动重试一次');
+        const retried = await requestDirector(segments, preset, knownSpeakers, url, signal, true);
+        try {
+            return normalizeDirectorResult(segments, retried);
+        } catch (retryError) {
+            if (retryError instanceof DirectorFormatError) {
+                throw new DirectorFormatError('分轨模型连续两次返回了无法解析的格式，请点击“重新分轨”再试');
+            }
+            throw retryError;
+        }
+    }
 }
 
 export async function listModels(preset, { signal } = {}) {
@@ -81,4 +139,4 @@ export async function listModels(preset, { signal } = {}) {
     return (payload?.data ?? []).map(item => item?.id).filter(Boolean).sort();
 }
 
-export const __test = { extractJsonArray, directorPrompt };
+export const __test = { DirectorFormatError, extractJsonArray, findArrayEnd, directorPrompt };

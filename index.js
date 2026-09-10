@@ -1180,7 +1180,7 @@ async function init() {
     renderPlayer();
     messageObserver = new MutationObserver(addAllMessageButtons);
     messageObserver.observe($id('chat'), { childList: true, subtree: true });
-    console.info('[梨园·PlayHouse] v0.3.0 已加载');
+    console.info('[梨园·PlayHouse] v0.3.1 已加载');
 }
 
 jQuery(init);
