@@ -235,4 +235,3 @@ export class TtsService {
 }
 
 export const __test = { Semaphore, hexToBlob, wait, ttsError, RETRY_DELAYS };
-
