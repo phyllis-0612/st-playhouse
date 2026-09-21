@@ -1,5 +1,5 @@
-import { joinApiUrl, sha1 } from './utils.js';
-import { SPEECH_28_SOUND_TAGS, supportsSpeech28SoundTags } from './constants.js';
+import { joinApiUrl, normalizePitch, sha1 } from './utils.js';
+import { normalizeTtsEmotion, SPEECH_28_SOUND_TAGS, supportsSpeech28SoundTags } from './constants.js';
 import { applySoundEffects } from './director.js';
 
 class Semaphore {
@@ -104,20 +104,22 @@ export function effectiveTtsText(segment, model) {
 export function buildTtsBody(segment, settings) {
     const model = settings.model || 'speech-2.8-hd';
     const speed = Math.min(2, Math.max(0.5, Number(segment.speed || 1) * Number(settings.globalSpeed || 1)));
-    const pitch = Math.min(12, Math.max(-12, Number(segment.pitch) || 0));
+    const pitch = normalizePitch(segment.pitch);
+    const emotion = normalizeTtsEmotion(segment.emotion, model);
+    const voiceSetting = {
+        voice_id: segment.voiceId,
+        speed,
+        vol: 1,
+        pitch,
+    };
+    if (emotion) voiceSetting.emotion = emotion;
     return {
         model,
         text: effectiveTtsText(segment, model),
         stream: false,
         output_format: 'hex',
         language_boost: 'auto',
-        voice_setting: {
-            voice_id: segment.voiceId,
-            speed,
-            vol: 1,
-            pitch,
-            emotion: segment.emotion || 'calm',
-        },
+        voice_setting: voiceSetting,
         audio_setting: { format: 'mp3', sample_rate: 32000, bitrate: 128000, channel: 1 },
     };
 }
