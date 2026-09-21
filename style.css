@@ -164,6 +164,7 @@
 .ph-check input { width: 20px; height: 20px; margin: 2px 0 0; accent-color: var(--ph-accent); flex: none; }
 .ph-check small { display: block; color: var(--ph-muted); font-size: 11px; margin-top: 2px; }
 .ph-hint { color: var(--ph-muted); font-size: 11px; line-height: 1.55; }
+.ph-divider { height: 1px; margin: 4px 0 13px; background: var(--ph-border); }
 .ph-content-tag-hint { margin: -7px 0 13px; }
 .ph-consent { padding: 9px; border: 1px dashed var(--ph-accent); border-radius: 6px; background: rgb(201 162 39 / .07); }
 .ph-progress { min-height: 32px; padding: 7px 9px; border-radius: 6px; background: rgb(127 127 127 / .08); color: var(--ph-muted); font-size: 11px; line-height: 1.45; }

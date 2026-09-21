@@ -1,4 +1,4 @@
-# 梨园·PlayHouse v0.3.1
+# 梨园·PlayHouse v0.4.0
 
 署名：克克姐&奶盖&鱼仔
 
@@ -18,7 +18,7 @@ SillyTavern/public/scripts/extensions/third-party/st-playhouse/
 
 1. 设置 → 朗读：确认正文标签，点击保存。默认只读取 `<content>…</content>`；可用逗号填写多个自定义候选标签。
 2. 设置 → 分轨模型：填写 OpenAI 兼容 Base URL、API Key，点击「拉取模型」后从下拉框选择并保存。也可选择「手动填写」。
-3. 设置 → 语音服务：填写 MiniMax Base URL 和 API Key，然后保存。现行 MiniMax 接口可不填 GroupId；旧中转要求时再填。
+3. 设置 → 语音服务：填写 MiniMax Base URL 和 API Key，选择语音模型后保存。默认 `speech-2.8-hd`；现行 MiniMax 接口可不填 GroupId，旧中转要求时再填。
 4. 音色 → 音色库：手填官方/已有 `voice_id`，或直接上传录音克隆新音色。
 5. 选择全局旁白、兜底音色，并配置自动分组池。
 6. 给当前角色卡绑定主角、旁白和常驻配角音色。
@@ -45,7 +45,14 @@ MiniMax 中国区的声音复刻要求账号完成个人或企业认证。克隆
 
 ## emotion 枚举
 
-当前限定为：`happy`、`sad`、`angry`、`fearful`、`disgusted`、`surprised`、`calm`、`whipser`。最后一个拼写来自 MiniMax 官方接口枚举，保持原样；分轨模型返回其它值时按 `calm` 处理。`fluent` 只适用于部分新模型，当前为兼容默认的 `speech-02-hd` 暂不开放。
+当前限定为：`happy`、`sad`、`angry`、`fearful`、`disgusted`、`surprised`、`calm`、`whipser`。最后一个拼写来自 MiniMax 官方接口枚举，保持原样；分轨模型返回其它值时按 `calm` 处理。`fluent` 只适用于部分模型，为保证所有可选模型行为一致暂不开放。
+
+## Speech 2.8 拟声与语调
+
+- 语音服务选择 `speech-2.8-hd` 或 `speech-2.8-turbo` 时，分轨模型会同时给出克制的 `speed`、`pitch` 和拟声插入位置。
+- 支持的原生拟声标签为：`laughs`、`chuckle`、`coughs`、`clear-throat`、`groans`、`breath`、`pant`、`inhale`、`exhale`、`gasps`、`sniffs`、`sighs`、`snorts`、`burps`、`lip-smacking`、`humming`、`hissing`、`emm`、`sneezes`。
+- 梨园只接受白名单标签，且插入锚点必须逐字存在并在原段落中唯一；校验失败时保留原文，不让分轨模型改写正文。每段最多加入两个拟声标签。
+- `speech-2.6-*` 与旧版 `speech-02-*` 会自动禁用拟声标签，避免标签被当作普通文字念出。
 
 ## iOS / Safari
 
@@ -76,7 +83,9 @@ MiniMax 中国区的声音复刻要求账号完成个人或企业认证。克隆
 
 ## 缓存
 
-音频以 segment 为粒度存入 IndexedDB，key 由正文、voice_id、语速、情绪和模型计算。超过容量按 LRU 淘汰。IndexedDB 不可用时自动降级为无缓存，不影响朗读。
+音频以 segment 为粒度存入 IndexedDB，key 由实际送入的正文（含合法拟声标签）、voice_id、语速、音高、情绪、模型与服务地址计算。超过容量按 LRU 淘汰。IndexedDB 不可用时自动降级为无缓存，不影响朗读。
+
+设置页可以手动按条件清理缓存：按合成日期只保留最近若干天，或按 LRU 清理到指定容量；也可以清空全部音频缓存。按日期清理使用首次合成时间，播放旧缓存不会重置其保留期限。
 
 iOS Safari、无痕模式或长期不访问站点可能清理缓存，这是浏览器限制，不是配置丢失。音色库和角色绑定保存在 SillyTavern 的扩展设置中。
 

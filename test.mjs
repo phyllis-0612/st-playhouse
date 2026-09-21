@@ -1,13 +1,14 @@
 import assert from 'node:assert/strict';
 import { extractTaggedContent, parseContentTags, segmentText } from './src/segmenter.js';
-import { __test as directorTest, directSegments, normalizeDirectorResult } from './src/director.js';
+import { __test as directorTest, applySoundEffects, directSegments, normalizeDirectorResult } from './src/director.js';
 import { applyVoices, clearRuntimeSpeakerMap } from './src/voicebank.js';
-import { cloneDefaults, EMOTIONS } from './src/constants.js';
+import { cloneDefaults, EMOTIONS, SPEECH_28_SOUND_TAGS } from './src/constants.js';
 import { buildTtsBody, buildTtsUrl, classifyTtsError, TtsService } from './src/tts.js';
 import { buildCloneBody, buildCloneUrl, validateCloneFile, validateVoiceId } from './src/voiceclone.js';
 import { joinApiUrl } from './src/utils.js';
 import { readFile } from 'node:fs/promises';
 import { audioBufferToMonoPcm16, buildBackgroundTrack, gapBetweenMs } from './src/background-audio.js';
+import { AudioCache } from './src/cache.js';
 
 const segmented = segmentText('夜色很静。*她抬起头。*「你好。」代码：```secret()``` ![图](x.png)');
 assert.deepEqual(segmented.map(item => item.type), ['narration', 'dialogue', 'narration']);
@@ -27,19 +28,33 @@ assert.equal(extractTaggedContent('<story.part>安全正文</story.part>', 'stor
 
 const directed = normalizeDirectorResult(segmented, [
     { idx: 0, type: 'narration', emotion: 'neutral', speed: 9, text: '模型篡改正文' },
-    { idx: 1, type: 'dialogue', speaker: '楚弥', emotion: 'angry', speed: .8, text: '模型篡改台词' },
-]);
+    { idx: 1, type: 'dialogue', speaker: '楚弥', emotion: 'angry', speed: .8, pitch: 20, effects: [
+        { tag: 'sighs', position: 'after', anchor: '你好' },
+        { tag: 'crying', position: 'before', anchor: '你好' },
+    ], text: '模型篡改台词' },
+], { ttsModel: 'speech-2.8-hd' });
 assert.equal(directed[0].text, segmented[0].text);
 assert.equal(directed[0].emotion, 'calm');
-assert.equal(directed[0].speed, 1.3);
+assert.equal(directed[0].speed, 2);
 assert.equal(directed[1].text, segmented[1].text);
 assert.equal(directed[1].emotion, 'angry');
+assert.equal(directed[1].pitch, 12);
+assert.deepEqual(directed[1].effects, [{ tag: 'sighs', position: 'after', anchor: '你好' }]);
+assert.equal(directed[1].ttsText, '你好(sighs)。');
 assert.equal(directed[2].type, 'narration');
+assert.equal(applySoundEffects('他说：“好。”', [{ tag: 'chuckle', position: 'before', anchor: '好' }]), '他说：“(chuckle)好。”');
+const oldModelDirected = normalizeDirectorResult(segmented, [{ idx: 1, effects: [{ tag: 'laughs', position: 'after', anchor: '你好' }] }], { ttsModel: 'speech-02-hd' });
+assert.deepEqual(oldModelDirected[1].effects, []);
+assert.equal(oldModelDirected[1].ttsText, segmented[1].text);
 
 const duplicateDirectorOutput = '[{"idx":0,"type":"narration","speaker":"阿[甲]"}]\n[{"idx":0,"type":"dialogue","speaker":"错误副本"}]';
 assert.equal(directorTest.extractJsonArray(duplicateDirectorOutput)[0].speaker, '阿[甲]');
 assert.equal(directorTest.extractJsonArray('说明：[不是 JSON]\n```json\n[{"idx":0}]\n```')[0].idx, 0);
 assert.throws(() => directorTest.extractJsonArray('没有数组'), /没有返回 JSON 数组/);
+assert.equal(SPEECH_28_SOUND_TAGS.length, 19);
+assert.match(directorTest.directorPrompt([], 'speech-2.8-hd'), /laughs, chuckle/);
+assert.match(directorTest.directorPrompt([], 'speech-2.8-hd'), /没有 crying 标签/);
+assert.match(directorTest.directorPrompt([], 'speech-02-hd'), /所有 effects 必须为 \[\]/);
 
 const originalFetch = globalThis.fetch;
 let directorCalls = 0;
@@ -67,6 +82,7 @@ try {
 }
 
 const settings = cloneDefaults();
+assert.equal(settings.tts.model, 'speech-2.8-hd');
 assert.equal(settings.miniPlayerVisible, true);
 assert.equal(settings.backgroundPlayback, false);
 clearRuntimeSpeakerMap();
@@ -84,6 +100,15 @@ const ttsBody = buildTtsBody({ text: '你好', voiceId: 'v1', speed: 1, emotion:
 assert.equal(ttsBody.audio_setting.format, 'mp3');
 assert.equal(ttsBody.audio_setting.sample_rate, 32000);
 assert.equal(ttsBody.voice_setting.emotion, 'calm');
+const tts28Body = buildTtsBody({ text: '你好', ttsText: '你好(laughs)', voiceId: 'v1', speed: 1.1, pitch: 2, emotion: 'happy' }, { model: 'speech-2.8-hd', globalSpeed: 1 });
+assert.equal(tts28Body.text, '你好(laughs)');
+assert.equal(tts28Body.voice_setting.pitch, 2);
+const restoredTts28Body = buildTtsBody({ text: '你好。', effects: [{ tag: 'laughs', position: 'before', anchor: '你好' }], voiceId: 'v1', speed: 1, emotion: 'happy' }, { model: 'speech-2.8-hd', globalSpeed: 1 });
+assert.equal(restoredTts28Body.text, '(laughs)你好。');
+const oldTtsBody = buildTtsBody({ text: '你好', ttsText: '你好(laughs)', voiceId: 'v1', speed: 1, emotion: 'happy' }, { model: 'speech-02-hd', globalSpeed: 1 });
+assert.equal(oldTtsBody.text, '你好');
+const tamperedTtsBody = buildTtsBody({ text: '你好', ttsText: '被改写了(laughs)', voiceId: 'v1', speed: 1, emotion: 'happy' }, { model: 'speech-2.8-hd', globalSpeed: 1 });
+assert.equal(tamperedTtsBody.text, '你好');
 assert.ok(EMOTIONS.includes('whipser'));
 assert.equal(classifyTtsError({ httpStatus: 429, message: 'too many requests' }).kind, 'rate_limit');
 assert.equal(classifyTtsError({ httpStatus: 429 }).retryable, true);
@@ -115,6 +140,24 @@ nonRetryService.adapter.synthesize = async () => {
 const nonRetryResult = await nonRetryService.synthesizeSegment({ text: '不重试', voiceId: 'v1', speed: 1, emotion: 'calm' });
 assert.equal(nonRetryCalls, 1);
 assert.equal(nonRetryResult.errorKind, 'auth');
+
+const cacheRecords = [
+    { key: 'old', size: 4, createdAt: 1, lastUsed: 30 },
+    { key: 'recent', size: 6, createdAt: 90, lastUsed: 20 },
+    { key: 'legacy', size: 3, lastUsed: 5 },
+];
+const cacheDeletes = [];
+const maintenanceCache = new AudioCache();
+maintenanceCache.list = async () => cacheRecords;
+maintenanceCache.transaction = async (_mode, callback) => callback({ delete: key => { cacheDeletes.push(key); return {}; } });
+maintenanceCache.usage = async () => ({ bytes: cacheRecords.filter(record => !cacheDeletes.includes(record.key)).reduce((sum, record) => sum + record.size, 0), count: cacheRecords.length - cacheDeletes.length });
+const ageResult = await maintenanceCache.pruneByAge(1, 24 * 60 * 60 * 1000 + 50);
+assert.deepEqual(cacheDeletes, ['old', 'legacy']);
+assert.equal(ageResult.freedBytes, 7);
+cacheDeletes.length = 0;
+const sizeResult = await maintenanceCache.pruneToSize(7 / 1024 / 1024);
+assert.deepEqual(cacheDeletes, ['legacy', 'recent']);
+assert.equal(sizeResult.remainingBytes, 4);
 
 assert.equal(validateVoiceId('PlayHouse01'), 'PlayHouse01');
 assert.throws(() => validateVoiceId('1bad'), /Voice ID/);
@@ -168,6 +211,11 @@ assert.match(indexSource, /ph_bar_hide.+hideMiniPlayer/);
 assert.match(indexSource, /prepareBackgroundForCurrent/);
 assert.match(panelSource, /id="ph_mini_player"/);
 assert.match(panelSource, /id="ph_background_playback"/);
+assert.match(panelSource, /id="ph_cache_cleanup_mode"/);
+assert.match(panelSource, /id="ph_cache_keep_days"/);
+assert.match(panelSource, /id="ph_cache_cleanup_mb"/);
+assert.match(indexSource, /segments: segments\.map\(segmentForMetadata\)/);
+assert.match(indexSource, /for \(const key of \['ttsText', 'blob'/);
 assert.match(panelSource, /id="ph_bar_restart"[^>]+本层从头播放/);
 assert.match(panelSource, /id="ph_bar_hide"[^>]+隐藏迷你播放条/);
 assert.match(styleSource, /--ph-control-bg: #262320/);

@@ -1,6 +1,6 @@
 import { extension_settings, renderExtensionTemplateAsync } from '../../../extensions.js';
 import { AudioCache } from './src/cache.js';
-import { cloneDefaults, MODULE_NAME, SETTINGS_KEY } from './src/constants.js';
+import { cloneDefaults, DIRECTOR_SCHEMA_VERSION, MODULE_NAME, SETTINGS_KEY, supportsSpeech28SoundTags } from './src/constants.js';
 import { directSegments, listModels } from './src/director.js';
 import { WebAudioPlayer } from './src/player.js';
 import { extractTaggedContent, parseContentTags, segmentText } from './src/segmenter.js';
@@ -27,6 +27,12 @@ const toast = (type, message, title = '梨园') => globalThis.toastr?.[type]?.(m
 
 function saveSettings() {
     context().saveSettingsDebounced?.();
+}
+
+function segmentForMetadata(segment) {
+    const clean = { ...segment };
+    for (const key of ['ttsText', 'blob', 'cached', 'audioKey', 'error', 'errorKind', 'errorCode', 'retryable', 'retryMessage', 'regenerating', 'attempts']) delete clean[key];
+    return clean;
 }
 
 function saved(label) {
@@ -308,13 +314,28 @@ async function processMessage(messageId, { forceDirector = false, autoPlay = tru
     const metadata = context().chatMetadata;
     metadata.playhouse ||= { tracks: {} };
     const savedTrack = metadata.playhouse.tracks?.[messageId];
-    let segments = !forceDirector && savedTrack?.sourceText === extracted.text ? savedTrack.segments : null;
+    let segments = !forceDirector
+        && savedTrack?.sourceText === extracted.text
+        && savedTrack?.directorSchemaVersion === DIRECTOR_SCHEMA_VERSION
+        && savedTrack?.ttsModel === settings.tts.model
+        ? savedTrack.segments
+        : null;
     try {
         if (!segments?.length) {
             $id('ph_target_status').textContent = `正在分轨 · ${local.length} 段…`;
-            segments = await directSegments(local, activePreset(), knownSpeakers(message), { signal: pipelineController.signal });
+            segments = await directSegments(local, activePreset(), knownSpeakers(message), {
+                signal: pipelineController.signal,
+                ttsModel: settings.tts.model,
+            });
             segments = applyVoices(segments, settings, getCardKey(message));
-            metadata.playhouse.tracks[messageId] = { segments, sourceText: extracted.text, matchedTags: extracted.matchedTags, updatedAt: Date.now() };
+            metadata.playhouse.tracks[messageId] = {
+                segments: segments.map(segmentForMetadata),
+                sourceText: extracted.text,
+                matchedTags: extracted.matchedTags,
+                directorSchemaVersion: DIRECTOR_SCHEMA_VERSION,
+                ttsModel: settings.tts.model,
+                updatedAt: Date.now(),
+            };
             context().saveMetadataDebounced?.();
         } else {
             segments = applyVoices(segments, settings, getCardKey(message));
@@ -633,9 +654,14 @@ function renderSettings() {
     $id('ph_tts_key').value = settings.tts.apiKey;
     $id('ph_tts_group').value = settings.tts.groupId;
     $id('ph_tts_model').value = settings.tts.model;
+    updateTtsModelHint();
     $id('ph_concurrency').value = settings.tts.concurrency;
     $id('ph_cache_enabled').checked = settings.cache.enabled;
     $id('ph_cache_max').value = settings.cache.maxMB;
+    $id('ph_cache_cleanup_mode').value = settings.cache.cleanupMode;
+    $id('ph_cache_keep_days').value = settings.cache.keepDays;
+    $id('ph_cache_cleanup_mb').value = settings.cache.cleanupMB;
+    renderCacheCleanupMode();
     renderVoiceBank();
     renderBindings();
     void updateCacheUsage();
@@ -644,6 +670,19 @@ function renderSettings() {
 async function updateCacheUsage() {
     const usage = await cache?.usage();
     $id('ph_cache_usage').textContent = cache?.available ? `${((usage?.bytes ?? 0) / 1024 / 1024).toFixed(1)} MB` : '当前环境不支持缓存';
+}
+
+function updateTtsModelHint() {
+    const model = $id('ph_tts_model').value;
+    $id('ph_tts_model_hint').textContent = supportsSpeech28SoundTags(model)
+        ? '支持 19 种原生拟声标签；分轨模型会在原文明示声音时自动、克制地插入。'
+        : '该模型不支持 Speech 2.8 拟声标签；分轨结果会自动关闭拟声标注。';
+}
+
+function renderCacheCleanupMode() {
+    const byDays = $id('ph_cache_cleanup_mode').value !== 'size';
+    $id('ph_cache_keep_days_field').hidden = !byDays;
+    $id('ph_cache_cleanup_mb_field').hidden = byDays;
 }
 
 function persistPresetForm() {
@@ -703,6 +742,9 @@ function persistVoiceDefaults() {
 function persistCacheForm() {
     settings.cache.enabled = $id('ph_cache_enabled').checked;
     settings.cache.maxMB = clamp($id('ph_cache_max').value, 10, 2000, 200);
+    settings.cache.cleanupMode = $id('ph_cache_cleanup_mode').value === 'size' ? 'size' : 'days';
+    settings.cache.keepDays = clamp($id('ph_cache_keep_days').value, 1, 3650, 30);
+    settings.cache.cleanupMB = clamp($id('ph_cache_cleanup_mb').value, 0, 2000, 100);
     cache.enabled = settings.cache.enabled;
     cache.maxMB = settings.cache.maxMB;
     saveSettings();
@@ -960,12 +1002,17 @@ function bindEvents() {
     $id('ph_director_test').addEventListener('click', async () => {
         persistPresetForm();
         try {
-            const result = await directSegments(segmentText('夜色很静。“你好。”'), activePreset(), ['测试角色']);
+            const result = await directSegments(segmentText('夜色很静。“你好。”'), activePreset(), ['测试角色'], { ttsModel: settings.tts.model });
             toast('success', `连接成功，返回 ${result.length} 段`);
         } catch (error) { toast('error', error.message); }
     });
 
-    for (const id of ['ph_tts_url', 'ph_tts_key', 'ph_tts_group', 'ph_tts_model', 'ph_concurrency']) $id(id).addEventListener('change', persistTtsForm);
+    for (const id of ['ph_tts_url', 'ph_tts_key', 'ph_tts_group', 'ph_tts_model', 'ph_concurrency']) {
+        $id(id).addEventListener('change', () => {
+            persistTtsForm();
+            if (id === 'ph_tts_model') updateTtsModelHint();
+        });
+    }
     $id('ph_tts_test').addEventListener('click', async () => {
         persistTtsForm();
         const voiceId = settings.narratorVoiceId || settings.fallbackVoiceId;
@@ -1052,7 +1099,33 @@ function bindEvents() {
     $id('ph_fallback').addEventListener('change', event => { settings.fallbackVoiceId = event.target.value; saveSettings(); });
     $id('ph_cache_enabled').addEventListener('change', async event => { settings.cache.enabled = event.target.checked; cache.enabled = settings.cache.enabled; if (cache.enabled && !cache.db) await cache.init(); await updateCacheUsage(); saveSettings(); });
     $id('ph_cache_max').addEventListener('change', event => { settings.cache.maxMB = clamp(event.target.value, 10, 2000, 200); cache.maxMB = settings.cache.maxMB; void cache.evict(); saveSettings(); });
-    $id('ph_cache_clear').addEventListener('click', async () => { await cache.clear(); await updateCacheUsage(); toast('success', '缓存已清空'); });
+    $id('ph_cache_cleanup_mode').addEventListener('change', () => { renderCacheCleanupMode(); persistCacheForm(); });
+    $id('ph_cache_keep_days').addEventListener('change', persistCacheForm);
+    $id('ph_cache_cleanup_mb').addEventListener('change', persistCacheForm);
+    $id('ph_cache_cleanup').addEventListener('click', async () => {
+        persistCacheForm();
+        try {
+            if (!cache.db && !(await cache.init())) throw new Error('浏览器 IndexedDB 不可用');
+            const result = settings.cache.cleanupMode === 'size'
+                ? await cache.pruneToSize(settings.cache.cleanupMB)
+                : await cache.pruneByAge(settings.cache.keepDays);
+            await updateCacheUsage();
+            const freedMB = (result.freedBytes / 1024 / 1024).toFixed(1);
+            toast('success', `已实际删除 ${result.removed} 条缓存，释放 ${freedMB} MB`);
+        } catch (error) {
+            toast('error', `缓存清理失败：${error.message}`);
+        }
+    });
+    $id('ph_cache_clear').addEventListener('click', async () => {
+        try {
+            if (!cache.db && !(await cache.init())) throw new Error('浏览器 IndexedDB 不可用');
+            const result = await cache.clear();
+            await updateCacheUsage();
+            toast('success', `缓存已清空（实际删除 ${result.removed} 条）`);
+        } catch (error) {
+            toast('error', `缓存清空失败：${error.message}`);
+        }
+    });
     $id('ph_save_defaults').addEventListener('click', async () => {
         persistVoiceDefaults();
         persistCacheForm();

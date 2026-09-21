@@ -10,7 +10,7 @@ export class AudioCache {
     }
 
     async init() {
-        if (!this.enabled || !globalThis.indexedDB) {
+        if (!globalThis.indexedDB) {
             this.available = false;
             return false;
         }
@@ -36,25 +36,34 @@ export class AudioCache {
         }
     }
 
-    transaction(mode, callback) {
-        if (!this.enabled || !this.available || !this.db) return Promise.resolve(null);
+    transaction(mode, callback, { strict = false } = {}) {
+        if (!this.available || !this.db) {
+            const error = new Error('IndexedDB 缓存不可用');
+            return strict ? Promise.reject(error) : Promise.resolve(null);
+        }
         return new Promise((resolve, reject) => {
             try {
                 const tx = this.db.transaction(STORE_NAME, mode);
                 const store = tx.objectStore(STORE_NAME);
                 const request = callback(store);
-                request.onsuccess = () => resolve(request.result);
+                let result;
+                request.onsuccess = () => { result = request.result; };
                 request.onerror = () => reject(request.error);
+                tx.oncomplete = () => resolve(result);
+                tx.onabort = () => reject(tx.error || new Error('IndexedDB 事务已中止'));
+                tx.onerror = () => reject(tx.error || new Error('IndexedDB 事务失败'));
             } catch (error) {
                 reject(error);
             }
         }).catch(error => {
             console.warn('[梨园] 缓存操作失败，继续无缓存播放', error);
+            if (strict) throw error;
             return null;
         });
     }
 
     async get(key) {
+        if (!this.enabled) return null;
         const record = await this.transaction('readonly', store => store.get(key));
         if (!record?.blob) return null;
         record.lastUsed = Date.now();
@@ -63,33 +72,71 @@ export class AudioCache {
     }
 
     async put(key, blob) {
-        if (!blob) return;
-        await this.transaction('readwrite', store => store.put({ key, blob, size: blob.size, lastUsed: Date.now() }));
+        if (!this.enabled || !blob) return;
+        const now = Date.now();
+        await this.transaction('readwrite', store => store.put({ key, blob, size: blob.size, createdAt: now, lastUsed: now }));
         await this.evict();
     }
 
-    async list() {
-        return (await this.transaction('readonly', store => store.getAll())) ?? [];
+    async list({ strict = false } = {}) {
+        return (await this.transaction('readonly', store => store.getAll(), { strict })) ?? [];
     }
 
-    async usage() {
-        const records = await this.list();
+    async usage({ strict = false } = {}) {
+        const records = await this.list({ strict });
         return { bytes: records.reduce((sum, item) => sum + (Number(item.size) || 0), 0), count: records.length };
     }
 
     async evict() {
-        const records = await this.list();
-        const limit = this.maxMB * 1024 * 1024;
-        let total = records.reduce((sum, item) => sum + (Number(item.size) || 0), 0);
-        if (total <= limit) return;
-        for (const record of records.sort((a, b) => a.lastUsed - b.lastUsed)) {
-            await this.transaction('readwrite', store => store.delete(record.key));
-            total -= record.size;
-            if (total <= limit) break;
+        try { return await this.pruneToSize(this.maxMB); }
+        catch (error) {
+            console.warn('[梨园] 自动缓存淘汰失败，不影响本次播放', error);
+            return { removed: 0, freedBytes: 0, remainingBytes: (await this.usage()).bytes };
         }
     }
 
+    async deleteRecords(records, totalBytes) {
+        let removed = 0;
+        for (const record of records) {
+            await this.transaction('readwrite', store => store.delete(record.key), { strict: true });
+            removed++;
+        }
+        const remaining = await this.usage({ strict: true });
+        return {
+            removed,
+            freedBytes: Math.max(0, totalBytes - remaining.bytes),
+            remainingBytes: remaining.bytes,
+        };
+    }
+
+    async pruneByAge(days, now = Date.now()) {
+        const records = await this.list({ strict: true });
+        const safeDays = Math.max(1, Number(days) || 1);
+        const cutoff = now - safeDays * 24 * 60 * 60 * 1000;
+        const stale = records.filter(record => Number(record.createdAt ?? record.lastUsed ?? 0) < cutoff);
+        const total = records.reduce((sum, item) => sum + (Number(item.size) || 0), 0);
+        return this.deleteRecords(stale, total);
+    }
+
+    async pruneToSize(maxMB) {
+        const records = await this.list({ strict: true });
+        const limit = Math.max(0, Number(maxMB) || 0) * 1024 * 1024;
+        const total = records.reduce((sum, item) => sum + (Number(item.size) || 0), 0);
+        let remaining = total;
+        const victims = [];
+        for (const record of records.sort((a, b) => Number(a.lastUsed || 0) - Number(b.lastUsed || 0))) {
+            if (remaining <= limit) break;
+            victims.push(record);
+            remaining -= Number(record.size) || 0;
+        }
+        return this.deleteRecords(victims, total);
+    }
+
     async clear() {
-        await this.transaction('readwrite', store => store.clear());
+        const before = await this.usage({ strict: true });
+        await this.transaction('readwrite', store => store.clear(), { strict: true });
+        const after = await this.usage({ strict: true });
+        if (after.count || after.bytes) throw new Error('缓存清空后的校验未通过');
+        return { removed: before.count, freedBytes: before.bytes, remainingBytes: 0 };
     }
 }
