@@ -127,7 +127,7 @@ function normalizePerformance(item, scene, ttsModel) {
         ? PACE_SPEED[pace]
         : Number.isFinite(Number(item?.speed)) ? clamp(item.speed, 0.5, 2, PACE_SPEED[pace]) : PACE_SPEED[pace];
     const pitchDirection = ALLOWED_PITCH_DIRECTIONS.has(item?.pitchDirection) ? item.pitchDirection : 'natural';
-    const pitchMagnitude = intensity >= 3 ? 2 : 1;
+    const pitchMagnitude = 1;
     const directedPitch = pitchDirection === 'lower' ? -pitchMagnitude : pitchDirection === 'higher' ? pitchMagnitude : 0;
     const pitch = ALLOWED_PITCH_DIRECTIONS.has(item?.pitchDirection) ? directedPitch : normalizePitch(item?.pitch);
     return { emotion, emotionConfidence: confidence, intensity, pace, speed, pitchDirection, pitch };
@@ -265,3 +265,4 @@ export async function listModels(preset, { signal } = {}) {
 }
 
 export const __test = { DirectorFormatError, extractDirectorPayload, extractJsonArray, findArrayEnd, findJsonEnd, directorPrompt, normalizePerformance, normalizeScene, normalizeSoundEffects };
+
