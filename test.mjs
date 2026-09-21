@@ -225,4 +225,3 @@ assert.match(styleSource, /-webkit-text-fill-color: var\(--ph-control-fg\)/);
 assert.match(styleSource, /input:-webkit-autofill/);
 
 console.log('梨园纯模块测试通过');
-
