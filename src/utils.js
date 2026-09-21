@@ -4,7 +4,7 @@ export function clamp(value, min, max, fallback = min) {
 }
 
 export function normalizePitch(value) {
-    const bounded = clamp(value, -12, 12, 0);
+    const bounded = clamp(value, -1, 1, 0);
     const rounded = Math.sign(bounded) * Math.round(Math.abs(bounded));
     return Object.is(rounded, -0) ? 0 : rounded;
 }
@@ -85,3 +85,4 @@ export function assertSecureUrl(value, pageProtocol = location.protocol) {
     }
     return url;
 }
+
