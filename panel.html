@@ -69,8 +69,8 @@
                     <label class="ph-field ph-span-two"><span>Voice ID</span><input id="ph_voice_id" type="text" autocomplete="off"></label>
                     <label class="ph-field"><span>显示名</span><input id="ph_voice_label" type="text"></label>
                     <label class="ph-field"><span>性别</span><select id="ph_voice_gender"><option value="unknown">未知</option><option value="female">女</option><option value="male">男</option></select></label>
-                    <label class="ph-field"><span>年龄</span><select id="ph_voice_age"><option value="unknown">未知</option><option value="young">青年</option><option value="mature">成熟</option><option value="child">儿童</option></select></label>
-                    <label class="ph-field"><span>音色标签</span><input id="ph_voice_tone" type="text" placeholder="冷、暖、清亮…"></label>
+                    <label class="ph-field"><span>年龄</span><select id="ph_voice_age"><option value="unknown">未知</option><option value="child">儿童</option><option value="young">青年</option><option value="mature">成熟</option><option value="elder">老年</option></select></label>
+                    <label class="ph-field"><span>音色标签</span><select id="ph_voice_tone"><option value="unknown">未知</option><option value="clear">清晰</option><option value="warm">温暖</option><option value="cold">冷感</option><option value="calm">沉静</option><option value="deep">低沉</option><option value="bright">明亮</option><option value="soft">柔和</option></select></label>
                     <label class="ph-field ph-span-two"><span>备注</span><input id="ph_voice_note" type="text"></label>
                     <button id="ph_add_voice" class="ph-btn ph-primary ph-span-two" type="button">加入音色库</button>
                 </div>
@@ -84,8 +84,8 @@
                     <label class="ph-field ph-span-two"><span>新 Voice ID</span><input id="ph_clone_voice_id" type="text" autocomplete="off" placeholder="例如 PlayHouseKeKe01"></label>
                     <label class="ph-field"><span>音色显示名</span><input id="ph_clone_label" type="text" placeholder="例如 克克姐"></label>
                     <label class="ph-field"><span>性别</span><select id="ph_clone_gender"><option value="unknown">未知</option><option value="female">女</option><option value="male">男</option></select></label>
-                    <label class="ph-field"><span>年龄</span><select id="ph_clone_age"><option value="unknown">未知</option><option value="young">青年</option><option value="mature">成熟</option><option value="child">儿童</option></select></label>
-                    <label class="ph-field"><span>音色标签</span><input id="ph_clone_tone" type="text" placeholder="冷、暖、清亮…"></label>
+                    <label class="ph-field"><span>年龄</span><select id="ph_clone_age"><option value="unknown">未知</option><option value="child">儿童</option><option value="young">青年</option><option value="mature">成熟</option><option value="elder">老年</option></select></label>
+                    <label class="ph-field"><span>音色标签</span><select id="ph_clone_tone"><option value="unknown">未知</option><option value="clear">清晰</option><option value="warm">温暖</option><option value="cold">冷感</option><option value="calm">沉静</option><option value="deep">低沉</option><option value="bright">明亮</option><option value="soft">柔和</option></select></label>
                     <label class="ph-check ph-span-two"><input id="ph_clone_denoise" type="checkbox"><span>开启降噪<small>原录音有持续底噪时再打开</small></span></label>
                     <label class="ph-check ph-span-two"><input id="ph_clone_normalize" type="checkbox" checked><span>音量归一化</span></label>
                     <label class="ph-check ph-span-two"><input id="ph_clone_activate" type="checkbox" checked><span>创建后立即合成一句以激活<small>会产生一次很短的 TTS 费用；不激活的克隆音色 7 天后会被删除</small></span></label>
@@ -96,7 +96,7 @@
             </details>
 
             <h3>自动分组池</h3>
-            <p class="ph-hint">按住 Ctrl/Command 可多选。同一个名字用确定性 hash，永远挑中同一把嗓子。</p>
+            <p class="ph-hint">先按性别与年龄分组，再优先匹配清晰、温暖、冷感、沉静、低沉、明亮或柔和等声线气质。同一个角色名会稳定使用同一把嗓子。</p>
             <div id="ph_pool_fields" class="ph-grid-two"></div>
             <button id="ph_save_voice_defaults" class="ph-btn ph-primary ph-wide ph-save" type="button"><i class="fa-solid fa-floppy-disk"></i> 保存自动分组池</button>
         </section>
@@ -243,3 +243,4 @@
     <button id="ph_bar_mode" type="button" title="切换旁白模式">旁白 + 台词</button>
     <button id="ph_bar_hide" type="button" title="隐藏迷你播放条" aria-label="隐藏迷你播放条"><i class="fa-solid fa-xmark"></i></button>
 </div>
+

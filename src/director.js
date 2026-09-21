@@ -2,7 +2,7 @@ import { emotionOptionsForModel, normalizeTtsEmotion, SPEECH_28_SOUND_TAGS, supp
 import { clamp, joinApiUrl } from './utils.js';
 
 const ALLOWED_GENDERS = new Set(['male', 'female', 'unknown']);
-const ALLOWED_AGES = new Set(['young', 'mature', 'child', 'unknown']);
+const ALLOWED_AGES = new Set(['child', 'young', 'mature', 'elder', 'unknown']);
 const ALLOWED_TONES = new Set(['clear', 'warm', 'cold', 'calm', 'deep', 'bright', 'soft', 'unknown']);
 const ALLOWED_SOUND_TAGS = new Set(SPEECH_28_SOUND_TAGS);
 const ALLOWED_SCENE_MOODS = new Set(['neutral', 'intimate', 'tender', 'joyful', 'playful', 'tense', 'suspenseful', 'sad', 'tragic', 'angry', 'fearful', 'solemn', 'urgent', 'mysterious']);
@@ -179,7 +179,8 @@ function directorPrompt(knownSpeakers, ttsModel = '') {
         '旁白引述他人话语时（如“她曾说过‘……’”、他想起那句“……”），即使有引号包裹，也应标为 narration，speaker 设为 null。判断依据是说话动作是否发生在当前场景的实时时间线上。',
         '判断台词归属时必须同时参考前文和后文。中文小说常见“台词在前、归属动作在后”的写法（如先出现台词，下一段才写“某某说道/递过来/签下”），此时 speaker 应归属给后文中执行动作的角色，而非前一句台词的说话人。请先通读全部 segments 确定每段台词的说话人，再填写 speaker。',
         '顶层格式：{"scene":{"mood":"neutral|intimate|tender|joyful|playful|tense|suspenseful|sad|tragic|angry|fearful|solemn|urgent|mysterious","tension":0到3整数,"pace":"slow|steady|fast","arc":"rising|steady|falling|turning"},"segments":[逐段结果]}。',
-        `逐段格式：{"idx":0,"type":"narration|dialogue","speaker":null或名字,"gender":"male|female|unknown","ageTag":"young|mature|child|unknown","toneTag":"clear|warm|cold|calm|deep|bright|soft|unknown","emotion":"${emotionOptions.join('|')}","emotionConfidence":"low|medium|high","intensity":0到3整数,"pace":"very_slow|slow|normal|fast|very_fast","effects":[]}`,
+        `逐段格式：{"idx":0,"type":"narration|dialogue","speaker":null或名字,"gender":"male|female|unknown","ageTag":"child|young|mature|elder|unknown","toneTag":"clear|warm|cold|calm|deep|bright|soft|unknown","emotion":"${emotionOptions.join('|')}","emotionConfidence":"low|medium|high","intensity":0到3整数,"pace":"very_slow|slow|normal|fast|very_fast","effects":[]}`,
+        'ageTag 表示角色稳定年龄层：幼童/儿童用 child，青年用 young，中年或成熟成人用 mature，明确的老人或高龄长辈用 elder。toneTag 表示角色长期声线气质而非本句临时情绪；可根据身份与描写选择 clear、warm、cold、calm、deep、bright、soft，无法判断用 unknown。',
         'emotion 表示可听见的主要表演情绪；潜台词不确定或混合情绪无法可靠归类时，把 emotionConfidence 设为 low，让语音模型自动判断，不要硬猜。',
         'intensity 和 pace 必须结合整场气氛、标点、动作和情绪转折克制选择。相邻段落没有明确转折时保持连续，不要忽快忽慢。',
         '同一角色在同一条消息内，pace 应保持一致，除非该段有明确的情绪转折标点（感叹号、省略号、问号连用）或动作描写表明语气骤变。无明确转折时沿用该角色在本消息内的首段 pace。',
