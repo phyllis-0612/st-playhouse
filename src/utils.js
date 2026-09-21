@@ -3,6 +3,12 @@ export function clamp(value, min, max, fallback = min) {
     return Number.isFinite(number) ? Math.min(max, Math.max(min, number)) : fallback;
 }
 
+export function normalizePitch(value) {
+    const bounded = clamp(value, -12, 12, 0);
+    const rounded = Math.sign(bounded) * Math.round(Math.abs(bounded));
+    return Object.is(rounded, -0) ? 0 : rounded;
+}
+
 export function hashString(value) {
     let hash = 2166136261;
     for (const char of String(value ?? '')) {
