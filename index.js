@@ -1,6 +1,6 @@
 import { extension_settings, renderExtensionTemplateAsync } from '../../../extensions.js';
 import { AudioCache } from './src/cache.js';
-import { cloneDefaults, DIRECTOR_SCHEMA_VERSION, MODULE_NAME, SETTINGS_KEY, supportsSpeech28SoundTags } from './src/constants.js';
+import { cloneDefaults, DIRECTOR_SCHEMA_VERSION, mergeDefaultVoiceCatalog, MODULE_NAME, SETTINGS_KEY, supportsSpeech28SoundTags, VOICE_CATALOG_VERSION } from './src/constants.js';
 import { directSegments, listModels } from './src/director.js';
 import { WebAudioPlayer } from './src/player.js';
 import { extractTaggedContent, parseContentTags, segmentText } from './src/segmenter.js';
@@ -48,8 +48,10 @@ function setCloneStatus(message, state = '') {
 }
 
 function loadSettings() {
+    const previousCatalogVersion = Number(extension_settings[SETTINGS_KEY]?.voiceCatalogVersion) || 0;
     extension_settings[SETTINGS_KEY] = mergeDefaults(extension_settings[SETTINGS_KEY], cloneDefaults());
     settings = extension_settings[SETTINGS_KEY];
+    if (previousCatalogVersion < VOICE_CATALOG_VERSION) mergeDefaultVoiceCatalog(settings);
 }
 
 function activePreset() {
@@ -1257,3 +1259,4 @@ async function init() {
 }
 
 jQuery(init);
+
