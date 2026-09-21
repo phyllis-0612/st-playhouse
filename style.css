@@ -204,6 +204,13 @@
 .ph-card strong, .ph-card small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ph-card small { color: var(--ph-muted); font-size: 11px; }
 .ph-card button { min-width: var(--ph-tap); min-height: var(--ph-tap); border: 0; background: transparent; color: var(--ph-muted); cursor: pointer; }
+.ph-voice-section { margin-bottom: 8px; border: 1px solid var(--ph-border); border-radius: 7px; overflow: hidden; }
+.ph-voice-section > summary { min-height: var(--ph-tap); display: flex; align-items: center; gap: 8px; padding: 0 10px; background: rgb(127 127 127 / .06); cursor: pointer; font-weight: 600; list-style: none; }
+.ph-voice-section > summary::-webkit-details-marker { display: none; }
+.ph-voice-section > summary::before { content: "›"; color: var(--ph-muted); transition: transform .2s; }
+.ph-voice-section[open] > summary::before { transform: rotate(90deg); }
+.ph-voice-section > summary span { margin-left: auto; color: var(--ph-muted); font-size: 11px; font-weight: 400; }
+.ph-voice-section > div { padding: 0 9px; }
 .ph-pool-field { margin-bottom: 12px; }
 .ph-pool-field select { min-height: 96px; padding: 6px; }
 
