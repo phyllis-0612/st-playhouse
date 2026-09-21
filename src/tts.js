@@ -1,4 +1,4 @@
-import { joinApiUrl, normalizePitch, sha1 } from './utils.js';
+import { joinApiUrl, sha1 } from './utils.js';
 import { normalizeTtsEmotion, SPEECH_28_SOUND_TAGS, supportsSpeech28SoundTags } from './constants.js';
 import { applySoundEffects } from './director.js';
 
@@ -104,7 +104,7 @@ export function effectiveTtsText(segment, model) {
 export function buildTtsBody(segment, settings) {
     const model = settings.model || 'speech-2.8-hd';
     const speed = Math.min(2, Math.max(0.5, Number(segment.speed || 1) * Number(settings.globalSpeed || 1)));
-    const pitch = normalizePitch(segment.pitch);
+    const pitch = 0;
     const emotion = normalizeTtsEmotion(segment.emotion, model);
     const voiceSetting = {
         voice_id: segment.voiceId,
@@ -237,3 +237,4 @@ export class TtsService {
 }
 
 export const __test = { Semaphore, hexToBlob, wait, ttsError, RETRY_DELAYS };
+
