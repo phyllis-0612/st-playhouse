@@ -29,6 +29,12 @@ function saveSettings() {
     context().saveSettingsDebounced?.();
 }
 
+function segmentForMetadata(segment) {
+    const clean = { ...segment };
+    for (const key of ['ttsText', 'blob', 'cached', 'audioKey', 'error', 'errorKind', 'errorCode', 'retryable', 'retryMessage', 'regenerating', 'attempts']) delete clean[key];
+    return clean;
+}
+
 function saved(label) {
     saveSettings();
     toast('success', `${label}已保存`);
@@ -323,7 +329,7 @@ async function processMessage(messageId, { forceDirector = false, autoPlay = tru
             });
             segments = applyVoices(segments, settings, getCardKey(message));
             metadata.playhouse.tracks[messageId] = {
-                segments,
+                segments: segments.map(segmentForMetadata),
                 sourceText: extracted.text,
                 matchedTags: extracted.matchedTags,
                 directorSchemaVersion: DIRECTOR_SCHEMA_VERSION,
@@ -1098,15 +1104,28 @@ function bindEvents() {
     $id('ph_cache_cleanup_mb').addEventListener('change', persistCacheForm);
     $id('ph_cache_cleanup').addEventListener('click', async () => {
         persistCacheForm();
-        if (!cache.db) await cache.init();
-        const result = settings.cache.cleanupMode === 'size'
-            ? await cache.pruneToSize(settings.cache.cleanupMB)
-            : await cache.pruneByAge(settings.cache.keepDays);
-        await updateCacheUsage();
-        const freedMB = ((result?.freedBytes ?? 0) / 1024 / 1024).toFixed(1);
-        toast('success', `已清理 ${result?.removed ?? 0} 条缓存，释放 ${freedMB} MB`);
+        try {
+            if (!cache.db && !(await cache.init())) throw new Error('浏览器 IndexedDB 不可用');
+            const result = settings.cache.cleanupMode === 'size'
+                ? await cache.pruneToSize(settings.cache.cleanupMB)
+                : await cache.pruneByAge(settings.cache.keepDays);
+            await updateCacheUsage();
+            const freedMB = (result.freedBytes / 1024 / 1024).toFixed(1);
+            toast('success', `已实际删除 ${result.removed} 条缓存，释放 ${freedMB} MB`);
+        } catch (error) {
+            toast('error', `缓存清理失败：${error.message}`);
+        }
     });
-    $id('ph_cache_clear').addEventListener('click', async () => { await cache.clear(); await updateCacheUsage(); toast('success', '缓存已清空'); });
+    $id('ph_cache_clear').addEventListener('click', async () => {
+        try {
+            if (!cache.db && !(await cache.init())) throw new Error('浏览器 IndexedDB 不可用');
+            const result = await cache.clear();
+            await updateCacheUsage();
+            toast('success', `缓存已清空（实际删除 ${result.removed} 条）`);
+        } catch (error) {
+            toast('error', `缓存清空失败：${error.message}`);
+        }
+    });
     $id('ph_save_defaults').addEventListener('click', async () => {
         persistVoiceDefaults();
         persistCacheForm();
@@ -1238,3 +1257,4 @@ async function init() {
 }
 
 jQuery(init);
+
