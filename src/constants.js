@@ -12,6 +12,43 @@ export const EMOTIONS = Object.freeze([
     'whipser',
 ]);
 
+export const MINIMAX_SPEECH_MODELS = Object.freeze([
+    'speech-2.8-hd',
+    'speech-2.8-turbo',
+    'speech-2.6-hd',
+    'speech-2.6-turbo',
+    'speech-02-hd',
+    'speech-02-turbo',
+]);
+
+export const SPEECH_28_SOUND_TAGS = Object.freeze([
+    'laughs',
+    'chuckle',
+    'coughs',
+    'clear-throat',
+    'groans',
+    'breath',
+    'pant',
+    'inhale',
+    'exhale',
+    'gasps',
+    'sniffs',
+    'sighs',
+    'snorts',
+    'burps',
+    'lip-smacking',
+    'humming',
+    'hissing',
+    'emm',
+    'sneezes',
+]);
+
+export const DIRECTOR_SCHEMA_VERSION = 2;
+
+export function supportsSpeech28SoundTags(model) {
+    return model === 'speech-2.8-hd' || model === 'speech-2.8-turbo';
+}
+
 export const DEFAULT_SETTINGS = Object.freeze({
     enabled: true,
     trigger: 'manual',
@@ -35,7 +72,7 @@ export const DEFAULT_SETTINGS = Object.freeze({
         baseUrl: 'https://api.minimaxi.com',
         apiKey: '',
         groupId: '',
-        model: 'speech-02-hd',
+        model: 'speech-2.8-hd',
         concurrency: 3,
         globalSpeed: 1,
     },
@@ -57,7 +94,7 @@ export const DEFAULT_SETTINGS = Object.freeze({
     narratorVoiceId: 'Chinese (Mandarin)_News_Anchor',
     fallbackVoiceId: 'female-shaonv',
     gapMs: { afterNarration: 300, afterDialogue: 200, speakerSwitch: 250 },
-    cache: { enabled: true, maxMB: 200 },
+    cache: { enabled: true, maxMB: 200, cleanupMode: 'days', keepDays: 30, cleanupMB: 100 },
     bindings: {},
 });
 

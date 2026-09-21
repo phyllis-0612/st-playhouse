@@ -10,7 +10,7 @@ export class AudioCache {
     }
 
     async init() {
-        if (!this.enabled || !globalThis.indexedDB) {
+        if (!globalThis.indexedDB) {
             this.available = false;
             return false;
         }
@@ -37,7 +37,7 @@ export class AudioCache {
     }
 
     transaction(mode, callback) {
-        if (!this.enabled || !this.available || !this.db) return Promise.resolve(null);
+        if (!this.available || !this.db) return Promise.resolve(null);
         return new Promise((resolve, reject) => {
             try {
                 const tx = this.db.transaction(STORE_NAME, mode);
@@ -55,6 +55,7 @@ export class AudioCache {
     }
 
     async get(key) {
+        if (!this.enabled) return null;
         const record = await this.transaction('readonly', store => store.get(key));
         if (!record?.blob) return null;
         record.lastUsed = Date.now();
@@ -63,8 +64,9 @@ export class AudioCache {
     }
 
     async put(key, blob) {
-        if (!blob) return;
-        await this.transaction('readwrite', store => store.put({ key, blob, size: blob.size, lastUsed: Date.now() }));
+        if (!this.enabled || !blob) return;
+        const now = Date.now();
+        await this.transaction('readwrite', store => store.put({ key, blob, size: blob.size, createdAt: now, lastUsed: now }));
         await this.evict();
     }
 
@@ -78,15 +80,43 @@ export class AudioCache {
     }
 
     async evict() {
-        const records = await this.list();
-        const limit = this.maxMB * 1024 * 1024;
-        let total = records.reduce((sum, item) => sum + (Number(item.size) || 0), 0);
-        if (total <= limit) return;
-        for (const record of records.sort((a, b) => a.lastUsed - b.lastUsed)) {
+        return this.pruneToSize(this.maxMB);
+    }
+
+    async deleteRecords(records, totalBytes) {
+        let freedBytes = 0;
+        for (const record of records) {
             await this.transaction('readwrite', store => store.delete(record.key));
-            total -= record.size;
-            if (total <= limit) break;
+            freedBytes += Number(record.size) || 0;
         }
+        return {
+            removed: records.length,
+            freedBytes,
+            remainingBytes: Math.max(0, totalBytes - freedBytes),
+        };
+    }
+
+    async pruneByAge(days, now = Date.now()) {
+        const records = await this.list();
+        const safeDays = Math.max(1, Number(days) || 1);
+        const cutoff = now - safeDays * 24 * 60 * 60 * 1000;
+        const stale = records.filter(record => Number(record.createdAt ?? record.lastUsed ?? 0) < cutoff);
+        const total = records.reduce((sum, item) => sum + (Number(item.size) || 0), 0);
+        return this.deleteRecords(stale, total);
+    }
+
+    async pruneToSize(maxMB) {
+        const records = await this.list();
+        const limit = Math.max(0, Number(maxMB) || 0) * 1024 * 1024;
+        const total = records.reduce((sum, item) => sum + (Number(item.size) || 0), 0);
+        let remaining = total;
+        const victims = [];
+        for (const record of records.sort((a, b) => Number(a.lastUsed || 0) - Number(b.lastUsed || 0))) {
+            if (remaining <= limit) break;
+            victims.push(record);
+            remaining -= Number(record.size) || 0;
+        }
+        return this.deleteRecords(victims, total);
     }
 
     async clear() {

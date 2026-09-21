@@ -1,4 +1,5 @@
 import { joinApiUrl, sha1 } from './utils.js';
+import { SPEECH_28_SOUND_TAGS, supportsSpeech28SoundTags } from './constants.js';
 
 class Semaphore {
     constructor(limit) {
@@ -88,18 +89,29 @@ export function buildTtsUrl(settings) {
     return url.href;
 }
 
+export function effectiveTtsText(segment, model) {
+    const original = String(segment.text ?? '');
+    if (!supportsSpeech28SoundTags(model) || typeof segment.ttsText !== 'string') return original;
+    const tags = SPEECH_28_SOUND_TAGS.map(tag => tag.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|');
+    const stripped = segment.ttsText.replace(new RegExp(`\\((?:${tags})\\)`, 'g'), '');
+    return stripped === original ? segment.ttsText : original;
+}
+
 export function buildTtsBody(segment, settings) {
+    const model = settings.model || 'speech-2.8-hd';
+    const speed = Math.min(2, Math.max(0.5, Number(segment.speed || 1) * Number(settings.globalSpeed || 1)));
+    const pitch = Math.min(12, Math.max(-12, Number(segment.pitch) || 0));
     return {
-        model: settings.model || 'speech-02-hd',
-        text: segment.text,
+        model,
+        text: effectiveTtsText(segment, model),
         stream: false,
         output_format: 'hex',
         language_boost: 'auto',
         voice_setting: {
             voice_id: segment.voiceId,
-            speed: Math.min(2, Math.max(0.5, Number(segment.speed || 1) * Number(settings.globalSpeed || 1))),
+            speed,
             vol: 1,
-            pitch: 0,
+            pitch,
             emotion: segment.emotion || 'calm',
         },
         audio_setting: { format: 'mp3', sample_rate: 32000, bitrate: 128000, channel: 1 },
@@ -151,7 +163,17 @@ export class TtsService {
     }
 
     async keyFor(segment) {
-        return sha1([segment.text, segment.voiceId, segment.speed, segment.emotion, this.settings.model].join('\u241f'));
+        const body = buildTtsBody(segment, this.settings);
+        return sha1([
+            body.text,
+            segment.voiceId,
+            body.voice_setting.speed,
+            body.voice_setting.pitch,
+            body.voice_setting.emotion,
+            body.model,
+            this.settings.baseUrl || '',
+            this.settings.groupId || '',
+        ].join('\u241f'));
     }
 
     reduceConcurrency() {
