@@ -5,6 +5,14 @@ const ALLOWED_GENDERS = new Set(['male', 'female', 'unknown']);
 const ALLOWED_AGES = new Set(['young', 'mature', 'child', 'unknown']);
 const ALLOWED_TONES = new Set(['clear', 'warm', 'cold', 'calm', 'deep', 'bright', 'soft', 'unknown']);
 const ALLOWED_SOUND_TAGS = new Set(SPEECH_28_SOUND_TAGS);
+const ALLOWED_SCENE_MOODS = new Set(['neutral', 'intimate', 'tender', 'joyful', 'playful', 'tense', 'suspenseful', 'sad', 'tragic', 'angry', 'fearful', 'solemn', 'urgent', 'mysterious']);
+const ALLOWED_SCENE_PACES = new Set(['slow', 'steady', 'fast']);
+const ALLOWED_SCENE_ARCS = new Set(['rising', 'steady', 'falling', 'turning']);
+const ALLOWED_PACES = new Set(['very_slow', 'slow', 'normal', 'fast', 'very_fast']);
+const ALLOWED_PITCH_DIRECTIONS = new Set(['lower', 'natural', 'higher']);
+const ALLOWED_CONFIDENCE = new Set(['low', 'medium', 'high']);
+const PACE_SPEED = Object.freeze({ very_slow: 0.78, slow: 0.9, normal: 1, fast: 1.12, very_fast: 1.28 });
+const SCENE_DEFAULT_PACE = Object.freeze({ slow: 'slow', steady: 'normal', fast: 'fast' });
 const MAX_EFFECTS_PER_SEGMENT = 2;
 
 class DirectorFormatError extends Error {
@@ -14,8 +22,8 @@ class DirectorFormatError extends Error {
     }
 }
 
-function findArrayEnd(text, start) {
-    let depth = 0;
+function findJsonEnd(text, start) {
+    const stack = [];
     let inString = false;
     let escaped = false;
     for (let index = start; index < text.length; index++) {
@@ -27,27 +35,48 @@ function findArrayEnd(text, start) {
             continue;
         }
         if (char === '"') inString = true;
-        else if (char === '[') depth++;
-        else if (char === ']' && --depth === 0) return index;
+        else if (char === '[' || char === '{') stack.push(char);
+        else if (char === ']' || char === '}') {
+            const expected = char === ']' ? '[' : '{';
+            if (stack.pop() !== expected) return -1;
+            if (!stack.length) return index;
+        }
     }
     return -1;
 }
 
-function extractJsonArray(value) {
+function findArrayEnd(text, start) {
+    return text[start] === '[' ? findJsonEnd(text, start) : -1;
+}
+
+function extractDirectorPayload(value) {
     const text = String(value ?? '').trim();
-    let sawArray = false;
-    for (let start = text.indexOf('['); start >= 0; start = text.indexOf('[', start + 1)) {
-        const end = findArrayEnd(text, start);
+    let sawJson = false;
+    for (let start = 0; start < text.length; start++) {
+        if (!['[', '{'].includes(text[start])) continue;
+        const end = findJsonEnd(text, start);
         if (end < 0) continue;
-        sawArray = true;
+        sawJson = true;
         try {
             const parsed = JSON.parse(text.slice(start, end + 1));
-            if (Array.isArray(parsed)) return parsed;
-        } catch { /* Try the next complete array in the response. */ }
+            if (Array.isArray(parsed)) return { scene: {}, segments: parsed };
+            if (parsed && typeof parsed === 'object' && Array.isArray(parsed.segments)) return parsed;
+        } catch { /* Try the next complete JSON value in the response. */ }
+        start = end;
     }
-    throw new DirectorFormatError(sawArray
-        ? '分轨模型返回格式异常：没有找到可解析的 JSON 数组'
-        : '分轨模型没有返回 JSON 数组');
+    throw new DirectorFormatError(sawJson
+        ? '分轨模型返回格式异常：没有找到包含 segments 的 JSON'
+        : '分轨模型没有返回 JSON');
+}
+
+function extractJsonArray(value) {
+    try { return extractDirectorPayload(value).segments; }
+    catch (error) {
+        if (error instanceof DirectorFormatError) {
+            throw new DirectorFormatError(error.message.replace('包含 segments 的 JSON', '可解析的 JSON 数组').replace('没有返回 JSON', '没有返回 JSON 数组'));
+        }
+        throw error;
+    }
 }
 
 function normalizeSoundEffects(rawEffects, text, enabled) {
@@ -79,27 +108,63 @@ export function applySoundEffects(text, effects = []) {
     ), source);
 }
 
+function normalizeScene(raw = {}) {
+    return {
+        mood: ALLOWED_SCENE_MOODS.has(raw?.mood) ? raw.mood : 'neutral',
+        tension: Math.round(clamp(raw?.tension, 0, 3, 1)),
+        pace: ALLOWED_SCENE_PACES.has(raw?.pace) ? raw.pace : 'steady',
+        arc: ALLOWED_SCENE_ARCS.has(raw?.arc) ? raw.arc : 'steady',
+    };
+}
+
+function normalizePerformance(item, scene, ttsModel) {
+    const confidence = ALLOWED_CONFIDENCE.has(item?.emotionConfidence) ? item.emotionConfidence : 'medium';
+    const normalizedEmotion = normalizeTtsEmotion(item?.emotion, ttsModel);
+    const emotion = confidence === 'low' ? '' : normalizedEmotion;
+    const intensity = Math.round(clamp(item?.intensity, 0, 3, 1));
+    const pace = ALLOWED_PACES.has(item?.pace) ? item.pace : SCENE_DEFAULT_PACE[scene.pace];
+    const speed = ALLOWED_PACES.has(item?.pace)
+        ? PACE_SPEED[pace]
+        : Number.isFinite(Number(item?.speed)) ? clamp(item.speed, 0.5, 2, PACE_SPEED[pace]) : PACE_SPEED[pace];
+    const pitchDirection = ALLOWED_PITCH_DIRECTIONS.has(item?.pitchDirection) ? item.pitchDirection : 'natural';
+    const pitchMagnitude = intensity >= 3 ? 2 : 1;
+    const directedPitch = pitchDirection === 'lower' ? -pitchMagnitude : pitchDirection === 'higher' ? pitchMagnitude : 0;
+    const pitch = ALLOWED_PITCH_DIRECTIONS.has(item?.pitchDirection) ? directedPitch : normalizePitch(item?.pitch);
+    return { emotion, emotionConfidence: confidence, intensity, pace, speed, pitchDirection, pitch };
+}
+
 export function normalizeDirectorResult(localSegments, raw, { ttsModel = '' } = {}) {
-    const parsed = Array.isArray(raw) ? raw : extractJsonArray(raw);
+    const payload = Array.isArray(raw) ? { scene: {}, segments: raw }
+        : raw && typeof raw === 'object' && Array.isArray(raw.segments) ? raw
+            : extractDirectorPayload(raw);
+    const parsed = payload.segments;
+    const scene = normalizeScene(payload.scene);
     const byIndex = new Map(parsed.filter(item => Number.isInteger(Number(item?.idx))).map(item => [Number(item.idx), item]));
     const soundEffectsEnabled = supportsSpeech28SoundTags(ttsModel);
     return localSegments.map(local => {
         const item = byIndex.get(local.idx) ?? {};
         const dialogue = item.type === 'dialogue' || (item.type !== 'narration' && local.type === 'dialogue');
         const speaker = dialogue && typeof item.speaker === 'string' && item.speaker.trim() ? item.speaker.trim() : null;
-        const emotion = normalizeTtsEmotion(item.emotion, ttsModel) || 'calm';
+        const performance = normalizePerformance(item, scene, ttsModel);
         const effects = normalizeSoundEffects(item.effects, local.text, soundEffectsEnabled);
         return {
             idx: local.idx,
-            type: dialogue && speaker ? 'dialogue' : 'narration',
-            speaker: dialogue && speaker ? speaker : null,
+            type: dialogue ? 'dialogue' : 'narration',
+            speaker: dialogue ? speaker : null,
             text: local.text,
             gender: ALLOWED_GENDERS.has(item.gender) ? item.gender : 'unknown',
             ageTag: ALLOWED_AGES.has(item.ageTag) ? item.ageTag : 'unknown',
             toneTag: ALLOWED_TONES.has(item.toneTag) ? item.toneTag : 'unknown',
-            emotion,
-            speed: clamp(item.speed, 0.5, 2, 1),
-            pitch: normalizePitch(item.pitch),
+            emotion: performance.emotion,
+            emotionConfidence: performance.emotionConfidence,
+            intensity: performance.intensity,
+            pace: performance.pace,
+            speed: performance.speed,
+            pitchDirection: performance.pitchDirection,
+            pitch: performance.pitch,
+            sceneMood: scene.mood,
+            sceneTension: scene.tension,
+            sceneArc: scene.arc,
             effects,
             ttsText: applySoundEffects(local.text, effects),
         };
@@ -110,19 +175,22 @@ function directorPrompt(knownSpeakers, ttsModel = '') {
     const soundEffectsEnabled = supportsSpeech28SoundTags(ttsModel);
     const emotionOptions = emotionOptionsForModel(ttsModel);
     const lines = [
-        '你是小说朗读分轨导演。只返回 JSON 数组，不要 markdown，不要解释。',
-        '输入中的正文已由前端切分。你只返回元数据，严禁返回 text/content/正文。',
+        '你是小说有声化表演导演。只分析本次输入的当前一条消息，不臆测前文、用户消息或未提供的角色设定。',
+        '先通读全部 segments，判断整场气氛与情绪走向；再结合场景结果逐段设计表演。只返回一个 JSON 对象，不要 markdown，不要解释。',
+        '输入正文已由前端切分，type 是可靠的预切分线索。你只返回元数据，严禁返回 text/content/正文，严禁改写或复述台词。',
         `已知角色：${knownSpeakers.filter(Boolean).join('、') || '无'}。speaker 优先且严格复用已知角色名；只有明确出现新名字才新建。`,
-        `每项格式：{"idx":0,"type":"narration|dialogue","speaker":null或名字,"gender":"male|female|unknown","ageTag":"young|mature|child|unknown","toneTag":"clear|warm|cold|calm|deep|bright|soft|unknown","emotion":"${emotionOptions.join('|')}","speed":0.5到2,"pitch":-12到12的整数,"effects":[]}`,
-        'speed 与 pitch 必须克制微调：默认 speed=1、pitch=0；pitch 只能是整数。通常 speed 使用 0.75 到 1.3、pitch 使用 -2 到 2，只有正文明确要求极端声音时才扩大。',
-        '引号内通常是台词；引号外、动作和环境描写通常是旁白。无法判断时用 narration、speaker=null、emotion=calm、speed=1、pitch=0、effects=[]。',
+        '顶层格式：{"scene":{"mood":"neutral|intimate|tender|joyful|playful|tense|suspenseful|sad|tragic|angry|fearful|solemn|urgent|mysterious","tension":0到3整数,"pace":"slow|steady|fast","arc":"rising|steady|falling|turning"},"segments":[逐段结果]}。',
+        `逐段格式：{"idx":0,"type":"narration|dialogue","speaker":null或名字,"gender":"male|female|unknown","ageTag":"young|mature|child|unknown","toneTag":"clear|warm|cold|calm|deep|bright|soft|unknown","emotion":"${emotionOptions.join('|')}","emotionConfidence":"low|medium|high","intensity":0到3整数,"pace":"very_slow|slow|normal|fast|very_fast","pitchDirection":"lower|natural|higher","effects":[]}`,
+        'emotion 表示可听见的主要表演情绪；潜台词不确定或混合情绪无法可靠归类时，把 emotionConfidence 设为 low，让语音模型自动判断，不要硬猜。',
+        'intensity、pace、pitchDirection 必须结合整场气氛、标点、动作和情绪转折克制选择。相邻段落没有明确转折时保持连续，不要忽快忽慢或频繁升降音高。',
+        '旁白以讲述清晰和气氛连续为先，角色台词才突出人物情绪。无法判断时沿用 scene.pace，emotionConfidence=low、intensity=1、pitchDirection=natural、effects=[]。',
     ];
     if (soundEffectsEnabled) {
         lines.push(
             `当前语音模型 ${ttsModel} 支持拟声标签。effects 每项格式为 {"tag":"标签","position":"before|after","anchor":"原文中唯一出现的连续短语"}。`,
             `只可使用这些精确标签：${SPEECH_28_SOUND_TAGS.join(', ')}。没有 crying 标签；哭泣用 sad，只有原文明确有抽鼻子时才可用 sniffs。`,
             '语义参考：laughs=大笑，chuckle=轻笑，coughs=咳嗽，clear-throat=清嗓，groans=呻吟，breath=呼吸声，pant=喘气，inhale/exhale=吸气/呼气，gasps=倒吸气，sniffs=抽鼻子，sighs=叹息，snorts=哼鼻，burps=打嗝，lip-smacking=咂嘴，humming=哼唱，hissing=嘶声，emm=迟疑嗯声，sneezes=打喷嚏。',
-            '只在正文明确描写可听见的笑、叹息、喘息、咳嗽、吸气等声音，或台词明确表现该声音时使用；不要仅凭情绪臆造。每段最多 2 个。',
+            '气氛只用于判断这些声音应当轻微还是明显，不能凭气氛凭空创造声音。只在正文明确描写，或台词与标点强烈暗示确实发出了该声音时使用；每段最多 2 个。',
             'anchor 必须逐字复制该段原文中只出现一次的短语，用 position 指定在该短语前或后插入；没有可靠锚点就返回 effects=[]。',
         );
     } else {
@@ -137,10 +205,13 @@ async function requestDirector(segments, preset, knownSpeakers, url, signal, tts
             role: 'system',
             content: [
                 directorPrompt(knownSpeakers, ttsModel),
-                repair ? '严格格式模式：只输出一份完整 JSON 数组。不要重复数组，不要代码围栏，不要解释或前后缀。' : '',
+                repair ? '严格格式模式：只输出一份包含 scene 和 segments 的完整 JSON 对象。不要重复对象，不要代码围栏，不要解释或前后缀。' : '',
             ].filter(Boolean).join('\n'),
         },
-        { role: 'user', content: JSON.stringify(segments.map(({ idx, text }) => ({ idx, text }))) },
+        { role: 'user', content: JSON.stringify({
+            scope: 'current_message_only',
+            segments: segments.map(({ idx, type, text }) => ({ idx, type, text })),
+        }) },
     ];
     const body = {
         model: preset.model,
@@ -190,4 +261,4 @@ export async function listModels(preset, { signal } = {}) {
     return (payload?.data ?? []).map(item => item?.id).filter(Boolean).sort();
 }
 
-export const __test = { DirectorFormatError, extractJsonArray, findArrayEnd, directorPrompt, normalizeSoundEffects };
+export const __test = { DirectorFormatError, extractDirectorPayload, extractJsonArray, findArrayEnd, findJsonEnd, directorPrompt, normalizePerformance, normalizeScene, normalizeSoundEffects };
