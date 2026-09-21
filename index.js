@@ -1257,4 +1257,3 @@ async function init() {
 }
 
 jQuery(init);
-
