@@ -9,8 +9,25 @@ export const EMOTIONS = Object.freeze([
     'disgusted',
     'surprised',
     'calm',
-    'whipser',
+    'fluent',
+    'whisper',
 ]);
+
+const BASE_EMOTIONS = Object.freeze(EMOTIONS.slice(0, 7));
+
+export function emotionOptionsForModel(model) {
+    const options = [...BASE_EMOTIONS];
+    if (String(model).startsWith('speech-2.6-') || String(model).startsWith('speech-2.8-')) options.push('fluent');
+    if (String(model).startsWith('speech-2.6-')) options.push('whisper');
+    return options;
+}
+
+export function normalizeTtsEmotion(value, model) {
+    const aliases = { neutral: 'calm', whipser: 'whisper' };
+    const raw = String(value ?? '').trim().toLowerCase();
+    const normalized = aliases[raw] || raw;
+    return emotionOptionsForModel(model).includes(normalized) ? normalized : '';
+}
 
 export const MINIMAX_SPEECH_MODELS = Object.freeze([
     'speech-2.8-hd',
@@ -43,7 +60,7 @@ export const SPEECH_28_SOUND_TAGS = Object.freeze([
     'sneezes',
 ]);
 
-export const DIRECTOR_SCHEMA_VERSION = 2;
+export const DIRECTOR_SCHEMA_VERSION = 3;
 
 export function supportsSpeech28SoundTags(model) {
     return model === 'speech-2.8-hd' || model === 'speech-2.8-turbo';
