@@ -1,10 +1,10 @@
 import { extension_settings, renderExtensionTemplateAsync } from '../../../extensions.js';
 import { AudioCache } from './src/cache.js';
-import { cloneDefaults, DIRECTOR_SCHEMA_VERSION, mergeDefaultVoiceCatalog, MODULE_NAME, SETTINGS_KEY, supportsSpeech28SoundTags, VOICE_CATALOG_VERSION } from './src/constants.js';
+import { cloneDefaults, DIRECTOR_SCHEMA_VERSION, emotionOptionsForModel, mergeDefaultVoiceCatalog, MODULE_NAME, SETTINGS_KEY, supportsSpeech28SoundTags, VOICE_CATALOG_VERSION } from './src/constants.js';
 import { directSegments, listModels } from './src/director.js';
 import { WebAudioPlayer } from './src/player.js';
 import { extractTaggedContent, parseContentTags, segmentText } from './src/segmenter.js';
-import { TtsService } from './src/tts.js';
+import { buildTtsBody, TtsService } from './src/tts.js';
 import { readAudioDuration, validateCloneFile, validateVoiceId, VoiceCloneService } from './src/voiceclone.js';
 import { applyVoices, bindSpeaker, clearRuntimeSpeakerMap, getNewSpeakers } from './src/voicebank.js';
 import { assertSecureUrl, clamp, escapeHtml, hashString, mergeDefaults } from './src/utils.js';
@@ -178,10 +178,22 @@ function renderCueEditor() {
     const sameSpeakerCount = item.type === 'dialogue' && item.speaker
         ? currentSegments.filter(segment => segment.type === 'dialogue' && segment.speaker === item.speaker).length
         : 0;
+    const request = buildTtsBody(item, settings.tts);
+    const voiceSetting = request.voice_setting;
+    const emotionLabels = { happy: '开心', sad: '悲伤', angry: '愤怒', fearful: '恐惧', disgusted: '厌恶', surprised: '惊讶', calm: '平静', fluent: '流畅', whisper: '耳语' };
+    const emotionOptions = [
+        `<option value="" ${item.emotion ? '' : 'selected'}>自动判断（不发送）</option>`,
+        ...emotionOptionsForModel(settings.tts.model).map(value => `<option value="${value}" ${item.emotion === value ? 'selected' : ''}>${emotionLabels[value] || value} · ${value}</option>`),
+    ].join('');
+    const effectLabels = item.effects?.length
+        ? item.effects.map(effect => `${effect.tag} · ${effect.position === 'before' ? '前置' : '后置'}「${effect.anchor}」`).join('；')
+        : '无';
+    const actualEmotion = voiceSetting.emotion || '自动判断（未发送）';
+    const actualText = request.text || item.text;
     const sameItem = editor.dataset.index === String(activeCueEditorIndex);
     editor.hidden = false;
     editor.dataset.index = String(activeCueEditorIndex);
-    editor.innerHTML = `<div class="ph-cue-editor-head"><div><strong>第 ${activeCueEditorIndex + 1} 段 · ${escapeHtml(item.speaker || '旁白')}</strong><small>${escapeHtml(item.text)}</small></div><button type="button" class="ph-cue-editor-close" data-cue-close aria-label="关闭调整">×</button></div>${item.error ? `<p class="ph-cue-error-detail">${escapeHtml(item.error)}</p>` : ''}<label class="ph-field"><span>重新合成使用的音色</span><select data-cue-voice>${voiceOptions(item.voiceId, false)}</select></label><div class="ph-row"><button type="button" class="ph-btn ph-primary" data-regenerate-one><i class="fa-solid fa-rotate"></i> 重新合成此段</button>${sameSpeakerCount ? `<button type="button" class="ph-btn" data-regenerate-speaker><i class="fa-solid fa-user-pen"></i> 替换该角色 ${sameSpeakerCount} 段</button>` : ''}</div><p class="ph-cue-scope">单段只修改这一句；替换角色会保存角色绑定，并重新合成当前消息里该角色的全部台词。</p>`;
+    editor.innerHTML = `<div class="ph-cue-editor-head"><div><strong>第 ${activeCueEditorIndex + 1} 段 · ${escapeHtml(item.speaker || '旁白')}</strong><small>${escapeHtml(item.text)}</small></div><button type="button" class="ph-cue-editor-close" data-cue-close aria-label="关闭调整">×</button></div>${item.error ? `<p class="ph-cue-error-detail">${escapeHtml(item.error)}</p>` : ''}<div class="ph-cue-params" aria-label="当前生成参数"><div><span>模型</span><strong>${escapeHtml(request.model)}</strong></div><div><span>类型</span><strong>${item.type === 'dialogue' ? '台词' : '旁白'}</strong></div><div><span>实际语速</span><strong>${Number(voiceSetting.speed).toFixed(2)}×</strong></div><div><span>音高</span><strong>${voiceSetting.pitch}（锁定）</strong></div><div><span>实际情绪</span><strong>${escapeHtml(actualEmotion)}</strong></div><div><span>音量</span><strong>${voiceSetting.vol}</strong></div></div><details class="ph-cue-request"><summary>导演分析与完整请求参数</summary><dl><div><dt>角色 / voice_id</dt><dd>${escapeHtml(item.speaker || '旁白')} / ${escapeHtml(voiceSetting.voice_id)}</dd></div><div><dt>导演情绪置信度</dt><dd>${escapeHtml(item.emotionConfidence || '—')}</dd></div><div><dt>导演强度</dt><dd>${escapeHtml(item.intensity ?? '—')}（分析值，不直接发送）</dd></div><div><dt>导演节奏</dt><dd>${escapeHtml(item.pace || '—')}</dd></div><div><dt>段落语速 × 全局语速</dt><dd>${Number(item.speed || 1).toFixed(2)} × ${Number(settings.tts.globalSpeed || 1).toFixed(2)} = ${Number(voiceSetting.speed).toFixed(2)}</dd></div><div><dt>拟声标签</dt><dd>${escapeHtml(effectLabels)}</dd></div><div><dt>语言 / 输出</dt><dd>${escapeHtml(request.language_boost)} / MP3 · 32kHz · 128kbps · 单声道</dd></div></dl><span>实际送入 MiniMax 的文本</span><pre>${escapeHtml(actualText)}</pre></details><div class="ph-grid-two ph-cue-controls"><label class="ph-field ph-span-two"><span>重新合成使用的音色</span><select data-cue-voice>${voiceOptions(item.voiceId, false)}</select></label><label class="ph-field"><span>情绪</span><select data-cue-emotion>${emotionOptions}</select></label><label class="ph-field"><span>段落语速</span><input data-cue-speed type="number" min="0.5" max="2" step="0.01" value="${Number(item.speed || 1).toFixed(2)}"></label><label class="ph-field"><span>音高</span><input type="number" value="0" disabled></label><label class="ph-field"><span>全局语速</span><input type="number" value="${Number(settings.tts.globalSpeed || 1).toFixed(2)}" disabled></label></div><div class="ph-row"><button type="button" class="ph-btn ph-primary" data-regenerate-one><i class="fa-solid fa-rotate"></i> 按以上参数重新生成</button>${sameSpeakerCount ? `<button type="button" class="ph-btn" data-regenerate-speaker><i class="fa-solid fa-user-pen"></i> 仅替换该角色音色 · ${sameSpeakerCount} 段</button>` : ''}</div><p class="ph-cue-scope">单段重生成会保存本段的音色、情绪和语速；替换角色只批量更换音色，不会把本段情绪或语速复制给其他台词。</p>`;
     if (!sameItem) editor.scrollIntoView({ block: 'nearest' });
 }
 
@@ -386,7 +398,7 @@ async function processMessage(messageId, { forceDirector = false, autoPlay = tru
     }
 }
 
-function persistTrackVoiceOverrides(indices) {
+function persistTrackSegmentParameters(indices) {
     const track = context().chatMetadata?.playhouse?.tracks?.[targetMessageId];
     if (!track?.segments) return;
     for (const index of indices) {
@@ -395,6 +407,9 @@ function persistTrackVoiceOverrides(indices) {
         if (!stored || !current) continue;
         if (current.voiceOverride) stored.voiceOverride = current.voiceOverride;
         else delete stored.voiceOverride;
+        stored.speed = current.speed;
+        stored.emotion = current.emotion;
+        stored.manualParameters = Boolean(current.manualParameters);
     }
     track.updatedAt = Date.now();
     context().saveMetadataDebounced?.();
@@ -406,7 +421,7 @@ function retryStatusMessage(detail) {
     return `${detail.error.label}，${seconds}秒后重试`;
 }
 
-async function regenerateSegments(indices, { voiceId = '', reason = '重新合成' } = {}) {
+async function regenerateSegments(indices, { voiceId = '', overrides = null, reason = '重新合成' } = {}) {
     const unique = [...new Set(indices.map(Number).filter(index => currentSegments[index]))];
     if (!unique.length) return;
     regenerationController?.abort();
@@ -416,10 +431,13 @@ async function regenerateSegments(indices, { voiceId = '', reason = '重新合�
         const item = currentSegments[index];
         if (voiceId && voiceId !== item.voiceId) item.voiceOverride = voiceId;
         if (voiceId) item.voiceId = voiceId;
+        if (overrides && Object.prototype.hasOwnProperty.call(overrides, 'speed')) item.speed = clamp(overrides.speed, 0.5, 2, item.speed || 1);
+        if (overrides && Object.prototype.hasOwnProperty.call(overrides, 'emotion')) item.emotion = String(overrides.emotion || '');
+        if (overrides) item.manualParameters = true;
         item.regenerating = true;
         item.retryMessage = '生成中…';
     }
-    persistTrackVoiceOverrides(unique);
+    persistTrackSegmentParameters(unique);
     renderSegments();
     $id('ph_target_status').textContent = `${reason} · 0/${unique.length}`;
     const service = new TtsService(settings.tts, cache);
@@ -463,11 +481,19 @@ function selectedCueVoice() {
     return $id('ph_cue_editor').querySelector('[data-cue-voice]')?.value || '';
 }
 
+function selectedCueParameters() {
+    const editor = $id('ph_cue_editor');
+    return {
+        speed: editor.querySelector('[data-cue-speed]')?.value,
+        emotion: editor.querySelector('[data-cue-emotion]')?.value || '',
+    };
+}
+
 async function regenerateActiveCue() {
     const index = activeCueEditorIndex;
     const voiceId = selectedCueVoice();
     if (!currentSegments[index] || !voiceId) return toast('warning', '请选择音色');
-    await regenerateSegments([index], { voiceId, reason: '重新合成此段' });
+    await regenerateSegments([index], { voiceId, overrides: selectedCueParameters(), reason: '按参数重新合成此段' });
 }
 
 async function regenerateActiveSpeaker() {
