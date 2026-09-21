@@ -127,6 +127,17 @@ const voices2 = applyVoices([{ type: 'dialogue', speaker: '沈砚', gender: 'mal
 assert.equal(voices1[0].voiceId, voices2[0].voiceId);
 const overridden = applyVoices([{ type: 'dialogue', speaker: '沈砚', voiceOverride: 'custom-voice' }], settings, 'card.png');
 assert.equal(overridden[0].voiceId, 'custom-voice');
+const toneSettings = cloneDefaults();
+toneSettings.voiceBank = [
+    { voiceId: 'warm-voice', toneTag: 'warm' },
+    { voiceId: 'cold-voice', toneTag: 'cold' },
+];
+toneSettings.fuzzyPools = { male_young: ['warm-voice', 'cold-voice'], unknown: [] };
+clearRuntimeSpeakerMap();
+assert.equal(applyVoices([{ type: 'dialogue', speaker: '季川', gender: 'male', ageTag: 'young', toneTag: 'warm' }], toneSettings, 'tone-card')[0].voiceId, 'warm-voice');
+clearRuntimeSpeakerMap();
+const elderVoice = applyVoices([{ type: 'dialogue', speaker: '周爷爷', gender: 'male', ageTag: 'elder', toneTag: 'warm' }], settings, 'elder-card')[0].voiceId;
+assert.ok(settings.fuzzyPools.male_elder.includes(elderVoice));
 
 assert.equal(joinApiUrl('https://example.com/v1', '/v1/models'), 'https://example.com/v1/models');
 assert.equal(buildTtsUrl({ baseUrl: 'https://api.minimaxi.com', groupId: '' }), 'https://api.minimaxi.com/v1/t2a_v2');
@@ -270,7 +281,11 @@ assert.match(indexSource, /buildTtsBody\(item, settings\.tts\)/);
 assert.match(indexSource, /data-cue-emotion/);
 assert.match(indexSource, /data-cue-speed/);
 assert.match(indexSource, /stored\.manualParameters/);
+assert.match(indexSource, /ph-voice-section/);
+assert.match(indexSource, /male_elder: '男 · 老年'/);
+assert.match(indexSource, /female_elder: '女 · 老年'/);
 assert.match(panelSource, /id="ph_mini_player"/);
+assert.match(panelSource, /value="elder">老年/);
 assert.match(panelSource, /id="ph_background_playback"/);
 assert.match(panelSource, /id="ph_cache_cleanup_mode"/);
 assert.match(panelSource, /id="ph_cache_keep_days"/);
