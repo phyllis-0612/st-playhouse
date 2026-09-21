@@ -1,5 +1,6 @@
 import { joinApiUrl, sha1 } from './utils.js';
 import { SPEECH_28_SOUND_TAGS, supportsSpeech28SoundTags } from './constants.js';
+import { applySoundEffects } from './director.js';
 
 class Semaphore {
     constructor(limit) {
@@ -91,10 +92,13 @@ export function buildTtsUrl(settings) {
 
 export function effectiveTtsText(segment, model) {
     const original = String(segment.text ?? '');
-    if (!supportsSpeech28SoundTags(model) || typeof segment.ttsText !== 'string') return original;
+    if (!supportsSpeech28SoundTags(model)) return original;
+    const candidate = typeof segment.ttsText === 'string'
+        ? segment.ttsText
+        : applySoundEffects(original, Array.isArray(segment.effects) ? segment.effects : []);
     const tags = SPEECH_28_SOUND_TAGS.map(tag => tag.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|');
-    const stripped = segment.ttsText.replace(new RegExp(`\\((?:${tags})\\)`, 'g'), '');
-    return stripped === original ? segment.ttsText : original;
+    const stripped = candidate.replace(new RegExp(`\\((?:${tags})\\)`, 'g'), '');
+    return stripped === original ? candidate : original;
 }
 
 export function buildTtsBody(segment, settings) {
@@ -231,3 +235,4 @@ export class TtsService {
 }
 
 export const __test = { Semaphore, hexToBlob, wait, ttsError, RETRY_DELAYS };
+
