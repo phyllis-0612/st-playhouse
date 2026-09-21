@@ -6,8 +6,9 @@
   "js": "index.js",
   "css": "style.css",
   "author": "克克姐&奶盖&鱼仔",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "homePage": "",
   "auto_update": false,
   "minimum_client_version": "1.14.0"
 }
+
