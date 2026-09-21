@@ -6,7 +6,7 @@
   "js": "index.js",
   "css": "style.css",
   "author": "克克姐&奶盖&鱼仔",
-  "version": "0.4.1",
+  "version": "0.5.0",
   "homePage": "",
   "auto_update": false,
   "minimum_client_version": "1.14.0"
