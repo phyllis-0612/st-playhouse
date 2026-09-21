@@ -1,5 +1,5 @@
-import { EMOTIONS, SPEECH_28_SOUND_TAGS, supportsSpeech28SoundTags } from './constants.js';
-import { clamp, joinApiUrl } from './utils.js';
+import { emotionOptionsForModel, normalizeTtsEmotion, SPEECH_28_SOUND_TAGS, supportsSpeech28SoundTags } from './constants.js';
+import { clamp, joinApiUrl, normalizePitch } from './utils.js';
 
 const ALLOWED_GENDERS = new Set(['male', 'female', 'unknown']);
 const ALLOWED_AGES = new Set(['young', 'mature', 'child', 'unknown']);
@@ -87,7 +87,7 @@ export function normalizeDirectorResult(localSegments, raw, { ttsModel = '' } = 
         const item = byIndex.get(local.idx) ?? {};
         const dialogue = item.type === 'dialogue' || (item.type !== 'narration' && local.type === 'dialogue');
         const speaker = dialogue && typeof item.speaker === 'string' && item.speaker.trim() ? item.speaker.trim() : null;
-        const emotion = EMOTIONS.includes(item.emotion) ? item.emotion : 'calm';
+        const emotion = normalizeTtsEmotion(item.emotion, ttsModel) || 'calm';
         const effects = normalizeSoundEffects(item.effects, local.text, soundEffectsEnabled);
         return {
             idx: local.idx,
@@ -99,7 +99,7 @@ export function normalizeDirectorResult(localSegments, raw, { ttsModel = '' } = 
             toneTag: ALLOWED_TONES.has(item.toneTag) ? item.toneTag : 'unknown',
             emotion,
             speed: clamp(item.speed, 0.5, 2, 1),
-            pitch: clamp(item.pitch, -12, 12, 0),
+            pitch: normalizePitch(item.pitch),
             effects,
             ttsText: applySoundEffects(local.text, effects),
         };
@@ -108,12 +108,13 @@ export function normalizeDirectorResult(localSegments, raw, { ttsModel = '' } = 
 
 function directorPrompt(knownSpeakers, ttsModel = '') {
     const soundEffectsEnabled = supportsSpeech28SoundTags(ttsModel);
+    const emotionOptions = emotionOptionsForModel(ttsModel);
     const lines = [
         '你是小说朗读分轨导演。只返回 JSON 数组，不要 markdown，不要解释。',
         '输入中的正文已由前端切分。你只返回元数据，严禁返回 text/content/正文。',
         `已知角色：${knownSpeakers.filter(Boolean).join('、') || '无'}。speaker 优先且严格复用已知角色名；只有明确出现新名字才新建。`,
-        '每项格式：{"idx":0,"type":"narration|dialogue","speaker":null或名字,"gender":"male|female|unknown","ageTag":"young|mature|child|unknown","toneTag":"clear|warm|cold|calm|deep|bright|soft|unknown","emotion":"happy|sad|angry|fearful|disgusted|surprised|calm|whipser","speed":0.5到2,"pitch":-12到12,"effects":[]}',
-        'speed 与 pitch 必须克制微调：默认 speed=1、pitch=0；通常 speed 使用 0.75 到 1.3、pitch 使用 -2 到 2，只有正文明确要求极端声音时才扩大。',
+        `每项格式：{"idx":0,"type":"narration|dialogue","speaker":null或名字,"gender":"male|female|unknown","ageTag":"young|mature|child|unknown","toneTag":"clear|warm|cold|calm|deep|bright|soft|unknown","emotion":"${emotionOptions.join('|')}","speed":0.5到2,"pitch":-12到12的整数,"effects":[]}`,
+        'speed 与 pitch 必须克制微调：默认 speed=1、pitch=0；pitch 只能是整数。通常 speed 使用 0.75 到 1.3、pitch 使用 -2 到 2，只有正文明确要求极端声音时才扩大。',
         '引号内通常是台词；引号外、动作和环境描写通常是旁白。无法判断时用 narration、speaker=null、emotion=calm、speed=1、pitch=0、effects=[]。',
     ];
     if (soundEffectsEnabled) {
