@@ -6,6 +6,24 @@ function pickDeterministic(speaker, pool) {
     return pool?.length ? pool[hashString(speaker) % pool.length] : '';
 }
 
+function toneMatchedPool(pool, voiceBank, toneTag) {
+    if (!pool?.length || !toneTag || toneTag === 'unknown') return pool;
+    const tones = new Map((voiceBank ?? []).map(voice => [voice.voiceId, voice.toneTag]));
+    const matched = pool.filter(voiceId => tones.get(voiceId) === toneTag);
+    return matched.length ? matched : pool;
+}
+
+function poolKeysFor(segment) {
+    const gender = ['male', 'female'].includes(segment.gender) ? segment.gender : 'unknown';
+    const age = ['child', 'young', 'mature', 'elder'].includes(segment.ageTag) ? segment.ageTag : 'unknown';
+    const keys = [];
+    if (gender !== 'unknown' && age !== 'unknown') keys.push(`${gender}_${age}`);
+    if (age === 'child') keys.push('child');
+    if (age === 'elder' && gender !== 'unknown') keys.push(`${gender}_mature`);
+    keys.push('unknown');
+    return [...new Set(keys)];
+}
+
 export function resolveVoice(segment, settings, cardKey = '') {
     const binding = settings.bindings?.[cardKey] ?? {};
     if (segment.type === 'narration') {
@@ -17,10 +35,12 @@ export function resolveVoice(segment, settings, cardKey = '') {
     const exact = [binding.main, ...(binding.extras ?? [])].find(item => item?.speaker === speaker)?.voiceId;
     let voiceId = exact;
     if (!voiceId) {
-        const specificKey = segment.ageTag === 'child' ? 'child' : `${segment.gender}_${segment.ageTag}`;
-        voiceId = pickDeterministic(speaker, settings.fuzzyPools?.[specificKey]);
+        for (const key of poolKeysFor(segment)) {
+            const pool = toneMatchedPool(settings.fuzzyPools?.[key], settings.voiceBank, segment.toneTag);
+            voiceId = pickDeterministic(speaker, pool);
+            if (voiceId) break;
+        }
     }
-    if (!voiceId) voiceId = pickDeterministic(speaker, settings.fuzzyPools?.unknown);
     voiceId ||= settings.fallbackVoiceId || '';
     sessionSpeakerMap.set(sessionKey, voiceId);
     return voiceId;
@@ -54,4 +74,5 @@ export function bindSpeaker(settings, cardKey, speaker, voiceId) {
     sessionSpeakerMap.set(`${cardKey}::${speaker}`, voiceId);
 }
 
-export const __test = { pickDeterministic };
+export const __test = { pickDeterministic, poolKeysFor, toneMatchedPool };
+
