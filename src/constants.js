@@ -60,8 +60,8 @@ export const SPEECH_28_SOUND_TAGS = Object.freeze([
     'sneezes',
 ]);
 
-export const DIRECTOR_SCHEMA_VERSION = 5;
-export const VOICE_CATALOG_VERSION = 2;
+export const DIRECTOR_SCHEMA_VERSION = 6;
+export const VOICE_CATALOG_VERSION = 3;
 
 export function supportsSpeech28SoundTags(model) {
     return model === 'speech-2.8-hd' || model === 'speech-2.8-turbo';
@@ -106,15 +106,15 @@ export const DEFAULT_SETTINGS = Object.freeze({
         { voiceId: 'Chinese (Mandarin)_Gentle_Youth', label: '温柔青年', gender: 'male', ageTag: 'young', toneTag: 'soft', note: 'MiniMax 官方普通话音色' },
         { voiceId: 'Chinese (Mandarin)_Straightforward_Boy', label: '直爽少年', gender: 'male', ageTag: 'young', toneTag: 'bright', note: 'MiniMax 官方普通话音色' },
         { voiceId: 'Chinese (Mandarin)_Pure-hearted_Boy', label: '纯真少年', gender: 'male', ageTag: 'young', toneTag: 'clear', note: 'MiniMax 官方普通话音色' },
-        { voiceId: 'Chinese (Mandarin)_Humorous_Elder', label: '幽默长者', gender: 'male', ageTag: 'mature', toneTag: 'warm', note: 'MiniMax 官方普通话音色' },
+        { voiceId: 'Chinese (Mandarin)_Humorous_Elder', label: '幽默长者', gender: 'male', ageTag: 'elder', toneTag: 'warm', note: 'MiniMax 官方普通话音色' },
         { voiceId: 'Chinese (Mandarin)_Gentleman', label: '儒雅绅士', gender: 'male', ageTag: 'mature', toneTag: 'warm', note: 'MiniMax 官方普通话音色' },
         { voiceId: 'Chinese (Mandarin)_Male_Announcer', label: '男播音员', gender: 'male', ageTag: 'mature', toneTag: 'deep', note: 'MiniMax 官方普通话音色' },
-        { voiceId: 'Chinese (Mandarin)_Kind-hearted_Elder', label: '慈祥长者', gender: 'male', ageTag: 'mature', toneTag: 'warm', note: 'MiniMax 官方普通话音色' },
+        { voiceId: 'Chinese (Mandarin)_Kind-hearted_Elder', label: '慈祥长者', gender: 'male', ageTag: 'elder', toneTag: 'warm', note: 'MiniMax 官方普通话音色' },
         { voiceId: 'Chinese (Mandarin)_Radio_Host', label: '电台男声', gender: 'male', ageTag: 'mature', toneTag: 'deep', note: 'MiniMax 官方普通话音色' },
         { voiceId: 'Chinese (Mandarin)_Mature_Woman', label: '成熟女声', gender: 'female', ageTag: 'mature', toneTag: 'warm', note: 'MiniMax 官方普通话音色' },
         { voiceId: 'Chinese (Mandarin)_Kind-hearted_Antie', label: '慈爱阿姨', gender: 'female', ageTag: 'mature', toneTag: 'warm', note: 'MiniMax 官方普通话音色' },
         { voiceId: 'Chinese (Mandarin)_Wise_Women', label: '知性女士', gender: 'female', ageTag: 'mature', toneTag: 'calm', note: 'MiniMax 官方普通话音色' },
-        { voiceId: 'Chinese (Mandarin)_Warm-HeartedAunt', label: '暖心阿姨', gender: 'female', ageTag: 'mature', toneTag: 'warm', note: 'MiniMax 官方普通话音色' },
+        { voiceId: 'Chinese (Mandarin)_Warm-HeartedAunt', label: '暖心阿姨', gender: 'female', ageTag: 'elder', toneTag: 'warm', note: 'MiniMax 官方普通话音色' },
         { voiceId: 'Arrogant_Miss', label: '傲娇小姐', gender: 'female', ageTag: 'young', toneTag: 'cold', note: 'MiniMax 官方普通话音色' },
         { voiceId: 'Chinese (Mandarin)_HK_Flight_Attendant', label: '港风空乘', gender: 'female', ageTag: 'young', toneTag: 'clear', note: 'MiniMax 官方普通话音色' },
         { voiceId: 'Chinese (Mandarin)_Warm_Bestie', label: '温暖闺蜜', gender: 'female', ageTag: 'young', toneTag: 'warm', note: 'MiniMax 官方普通话音色' },
@@ -132,13 +132,17 @@ export const DEFAULT_SETTINGS = Object.freeze({
         { voiceId: 'Chinese (Mandarin)_Stubborn_Friend', label: '倔强好友', gender: 'unknown', ageTag: 'young', toneTag: 'cold', note: 'MiniMax 官方普通话音色' },
         { voiceId: 'Chinese (Mandarin)_Lyrical_Voice', label: '抒情声线', gender: 'unknown', ageTag: 'young', toneTag: 'soft', note: 'MiniMax 官方普通话音色' },
         { voiceId: 'Chinese (Mandarin)_Sincere_Adult', label: '真诚大人', gender: 'unknown', ageTag: 'mature', toneTag: 'clear', note: 'MiniMax 官方普通话音色' },
-        { voiceId: 'Chinese (Mandarin)_Gentle_Senior', label: '温和长辈', gender: 'unknown', ageTag: 'mature', toneTag: 'soft', note: 'MiniMax 官方普通话音色' },
+        { voiceId: 'Chinese (Mandarin)_Gentle_Senior', label: '温和长辈', gender: 'unknown', ageTag: 'elder', toneTag: 'soft', note: 'MiniMax 官方普通话音色' },
     ],
     fuzzyPools: {
+        male_child: ['Chinese (Mandarin)_Straightforward_Boy', 'Chinese (Mandarin)_Pure-hearted_Boy'],
+        female_child: ['female-shaonv', 'Chinese (Mandarin)_Cute_Spirit'],
         male_young: ['male-qn-qingse', 'Chinese (Mandarin)_Unrestrained_Young_Man', 'Chinese (Mandarin)_Southern_Young_Man', 'Chinese (Mandarin)_Gentle_Youth', 'Chinese (Mandarin)_Straightforward_Boy', 'Chinese (Mandarin)_Pure-hearted_Boy'],
         male_mature: ['Chinese (Mandarin)_Reliable_Executive', 'Chinese (Mandarin)_Humorous_Elder', 'Chinese (Mandarin)_Gentleman', 'Chinese (Mandarin)_Male_Announcer', 'Chinese (Mandarin)_Kind-hearted_Elder', 'Chinese (Mandarin)_Radio_Host'],
+        male_elder: ['Chinese (Mandarin)_Humorous_Elder', 'Chinese (Mandarin)_Kind-hearted_Elder', 'Chinese (Mandarin)_Gentle_Senior'],
         female_young: ['female-shaonv', 'Arrogant_Miss', 'Chinese (Mandarin)_HK_Flight_Attendant', 'Chinese (Mandarin)_Warm_Bestie', 'Chinese (Mandarin)_Sweet_Lady', 'Chinese (Mandarin)_Warm_Girl', 'Chinese (Mandarin)_Crisp_Girl', 'Chinese (Mandarin)_Soft_Girl', 'Chinese (Mandarin)_IntellectualGirl', 'Chinese (Mandarin)_Warm_HeartedGirl', 'Chinese (Mandarin)_Laid_BackGirl', 'Chinese (Mandarin)_ExplorativeGirl', 'Chinese (Mandarin)_BashfulGirl'],
         female_mature: ['Chinese (Mandarin)_News_Anchor', 'Chinese (Mandarin)_Mature_Woman', 'Chinese (Mandarin)_Kind-hearted_Antie', 'Chinese (Mandarin)_Wise_Women', 'Chinese (Mandarin)_Warm-HeartedAunt'],
+        female_elder: ['Chinese (Mandarin)_Wise_Women', 'Chinese (Mandarin)_Warm-HeartedAunt'],
         child: ['female-shaonv', 'Chinese (Mandarin)_Cute_Spirit'],
         unknown: ['male-qn-qingse', 'female-shaonv', 'Robot_Armor', 'Chinese (Mandarin)_Stubborn_Friend', 'Chinese (Mandarin)_Lyrical_Voice', 'Chinese (Mandarin)_Sincere_Adult', 'Chinese (Mandarin)_Gentle_Senior'],
     },
@@ -160,6 +164,9 @@ export function mergeDefaultVoiceCatalog(target, defaults = cloneDefaults()) {
         if (!existing.has(voice.voiceId)) {
             target.voiceBank.push({ ...voice });
             existing.add(voice.voiceId);
+        } else {
+            const current = target.voiceBank.find(item => item?.voiceId === voice.voiceId);
+            for (const key of ['gender', 'ageTag', 'toneTag']) current[key] = voice[key];
         }
     }
     target.fuzzyPools = target.fuzzyPools && typeof target.fuzzyPools === 'object' ? target.fuzzyPools : {};
