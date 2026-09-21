@@ -649,9 +649,14 @@ function renderBindings() {
 }
 
 function renderVoiceBank() {
-    $id('ph_voice_list').innerHTML = settings.voiceBank.map((voice, index) => `<div class="ph-card"><div><strong>${escapeHtml(voice.label || voice.voiceId)}</strong><small>${escapeHtml([voice.gender, voice.ageTag, voice.toneTag, voice.voiceId].filter(Boolean).join(' · '))}</small></div><button type="button" data-preview-voice="${index}" aria-label="试听"><i class="fa-solid fa-play"></i></button><button type="button" data-remove-voice="${index}" aria-label="删除"><i class="fa-solid fa-trash"></i></button></div>`).join('') || '<p class="ph-hint">音色库是空的。</p>';
+    const builtinIds = new Set(cloneDefaults().voiceBank.map(voice => voice.voiceId));
+    const entries = settings.voiceBank.map((voice, index) => ({ voice, index }));
+    const renderCards = list => list.map(({ voice, index }) => `<div class="ph-card"><div><strong>${escapeHtml(voice.label || voice.voiceId)}</strong><small>${escapeHtml([voice.gender, voice.ageTag, voice.toneTag, voice.voiceId].filter(Boolean).join(' · '))}</small></div><button type="button" data-preview-voice="${index}" aria-label="试听"><i class="fa-solid fa-play"></i></button><button type="button" data-remove-voice="${index}" aria-label="删除"><i class="fa-solid fa-trash"></i></button></div>`).join('');
+    const mine = entries.filter(({ voice }) => !builtinIds.has(voice.voiceId));
+    const builtin = entries.filter(({ voice }) => builtinIds.has(voice.voiceId));
+    $id('ph_voice_list').innerHTML = `<details class="ph-voice-section" open><summary>我的音色 <span>${mine.length} 个</span></summary><div>${renderCards(mine) || '<p class="ph-hint">还没有克隆或手动添加的音色。</p>'}</div></details><details class="ph-voice-section"><summary>插件内置音色 <span>${builtin.length} 个</span></summary><div>${renderCards(builtin) || '<p class="ph-hint">没有内置音色。</p>'}</div></details>`;
     for (const id of ['ph_narrator', 'ph_fallback']) fillVoiceSelect(id, id === 'ph_narrator' ? settings.narratorVoiceId : settings.fallbackVoiceId, true);
-    const labels = { male_young: '男 · 青年', male_mature: '男 · 成熟', female_young: '女 · 青年', female_mature: '女 · 成熟', child: '儿童', unknown: '无法判断' };
+    const labels = { male_child: '男 · 儿童', female_child: '女 · 儿童', male_young: '男 · 青年', female_young: '女 · 青年', male_mature: '男 · 成熟', female_mature: '女 · 成熟', male_elder: '男 · 老年', female_elder: '女 · 老年', child: '儿童 · 性别未知', unknown: '无法判断 / 特殊角色' };
     $id('ph_pool_fields').innerHTML = Object.entries(labels).map(([key, label]) => `<label class="ph-pool-field"><span>${label}</span><select multiple data-pool="${key}">${settings.voiceBank.map(voice => `<option value="${escapeHtml(voice.voiceId)}" ${(settings.fuzzyPools?.[key] ?? []).includes(voice.voiceId) ? 'selected' : ''}>${escapeHtml(voice.label || voice.voiceId)}</option>`).join('')}</select></label>`).join('');
 }
 
@@ -872,7 +877,8 @@ async function cloneVoiceFromForm() {
             }
             activated = true;
         }
-        for (const id of ['ph_clone_voice_id', 'ph_clone_label', 'ph_clone_tone']) $id(id).value = '';
+        for (const id of ['ph_clone_voice_id', 'ph_clone_label']) $id(id).value = '';
+        $id('ph_clone_tone').value = 'unknown';
         $id('ph_clone_file').value = '';
         $id('ph_clone_consent').checked = false;
         renderVoiceBank();
@@ -1107,7 +1113,8 @@ function bindEvents() {
         if (!voiceId) return toast('warning', 'Voice ID 不能为空');
         if (settings.voiceBank.some(voice => voice.voiceId === voiceId)) return toast('warning', '这个 Voice ID 已经在库里');
         settings.voiceBank.push({ voiceId, label: $id('ph_voice_label').value.trim() || voiceId, gender: $id('ph_voice_gender').value, ageTag: $id('ph_voice_age').value, toneTag: $id('ph_voice_tone').value.trim() || 'unknown', note: $id('ph_voice_note').value.trim() });
-        for (const id of ['ph_voice_id', 'ph_voice_label', 'ph_voice_tone', 'ph_voice_note']) $id(id).value = '';
+        for (const id of ['ph_voice_id', 'ph_voice_label', 'ph_voice_note']) $id(id).value = '';
+        $id('ph_voice_tone').value = 'unknown';
         saveSettings(); renderSettings(); toast('success', '音色已加入');
     });
     $id('ph_clone_file').addEventListener('change', async event => {
