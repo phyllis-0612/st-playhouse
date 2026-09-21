@@ -1,6 +1,6 @@
 import { extension_settings, renderExtensionTemplateAsync } from '../../../extensions.js';
 import { AudioCache } from './src/cache.js';
-import { cloneDefaults, DIRECTOR_SCHEMA_VERSION, MODULE_NAME, SETTINGS_KEY, supportsSpeech28SoundTags } from './src/constants.js';
+import { cloneDefaults, DIRECTOR_SCHEMA_VERSION, mergeDefaultVoiceCatalog, MODULE_NAME, SETTINGS_KEY, supportsSpeech28SoundTags, VOICE_CATALOG_VERSION } from './src/constants.js';
 import { directSegments, listModels } from './src/director.js';
 import { WebAudioPlayer } from './src/player.js';
 import { extractTaggedContent, parseContentTags, segmentText } from './src/segmenter.js';
@@ -21,6 +21,9 @@ let messageObserver = null;
 let cloneController = null;
 let regenerationController = null;
 let activeCueEditorIndex = -1;
+let previewGeneration = 0;
+let previewActive = false;
+let readingQueueSnapshot = null;
 
 const $id = id => document.getElementById(id);
 const toast = (type, message, title = '梨园') => globalThis.toastr?.[type]?.(message, title) ?? console[type === 'error' ? 'error' : 'log'](`[${title}] ${message}`);
@@ -48,8 +51,10 @@ function setCloneStatus(message, state = '') {
 }
 
 function loadSettings() {
+    const previousCatalogVersion = Number(extension_settings[SETTINGS_KEY]?.voiceCatalogVersion) || 0;
     extension_settings[SETTINGS_KEY] = mergeDefaults(extension_settings[SETTINGS_KEY], cloneDefaults());
     settings = extension_settings[SETTINGS_KEY];
+    if (previousCatalogVersion < VOICE_CATALOG_VERSION) mergeDefaultVoiceCatalog(settings);
 }
 
 function activePreset() {
@@ -543,11 +548,42 @@ function openPanel(page = 'read') {
     renderTarget();
 }
 
+function restoreReadingQueue() {
+    previewGeneration++;
+    const snapshot = readingQueueSnapshot;
+    readingQueueSnapshot = null;
+    if (!previewActive) return;
+    previewActive = false;
+    player.setQueue(currentSegments, snapshot?.mode || settings.narrationMode);
+    if (Number.isInteger(snapshot?.cursor) && player.isLegal(snapshot.cursor)) {
+        player.cursor = snapshot.cursor;
+        player.state = 'paused';
+    }
+    renderPlayer();
+    if (settings.backgroundPlayback && currentSegments.length) void prepareBackgroundForCurrent();
+}
+
+async function synthesizeAndPlayPreview(segment) {
+    readingQueueSnapshot ||= { cursor: player.cursor, mode: player.mode };
+    const generation = ++previewGeneration;
+    const service = new TtsService(settings.tts, cache);
+    const result = await service.synthesizeSegment(segment);
+    if (result.error) throw new Error(result.error);
+    if (generation !== previewGeneration) return result;
+    previewActive = true;
+    player.setQueue([result], 'full');
+    renderPlayer();
+    await player.unlockFromGesture();
+    if (generation === previewGeneration && previewActive) await player.play();
+    return result;
+}
+
 function closePanel() {
     $id('playhouse_panel').hidden = true;
 }
 
 function showPanelPage(page) {
+    if (page === 'read') restoreReadingQueue();
     if (page !== 'help') previousPanelPage = page;
     document.querySelectorAll('.ph-page').forEach(node => { node.hidden = node.dataset.page !== page; });
     document.querySelectorAll('.ph-tabs button').forEach(button => button.setAttribute('aria-selected', String(button.dataset.page === page)));
@@ -803,15 +839,12 @@ async function cloneVoiceFromForm() {
         let activated = false;
         if ($id('ph_clone_activate').checked) {
             setCloneStatus('音色创建成功，正在合成一句以激活…', 'working');
-            const tts = new TtsService(settings.tts, cache);
-            const sample = await tts.synthesizeSegment({ idx: 0, type: 'dialogue', speaker: voice.label, text: '你好，我是梨园新加入的声音。', voiceId, speed: 1, emotion: 'calm' });
-            if (sample.error) throw new Error(`音色已创建并入库，但激活试听失败：${sample.error}`);
+            try {
+                await synthesizeAndPlayPreview({ idx: 0, type: 'dialogue', speaker: voice.label, text: '你好，我是梨园新加入的声音。', voiceId, speed: 1, emotion: 'calm' });
+            } catch (error) {
+                throw new Error(`音色已创建并入库，但激活试听失败：${error.message}`);
+            }
             activated = true;
-            currentSegments = [sample];
-            player.setQueue([sample], 'full');
-            renderPlayer();
-            await player.unlockFromGesture();
-            await player.play();
         }
         for (const id of ['ph_clone_voice_id', 'ph_clone_label', 'ph_clone_tone']) $id(id).value = '';
         $id('ph_clone_file').value = '';
@@ -1017,10 +1050,9 @@ function bindEvents() {
         persistTtsForm();
         const voiceId = settings.narratorVoiceId || settings.fallbackVoiceId;
         if (!voiceId) return toast('warning', '先选择旁白或兜底音色');
-        const service = new TtsService(settings.tts, cache);
-        const result = await service.synthesizeSegment({ idx: 0, type: 'narration', speaker: null, text: '梨园试音，一切顺利。', voiceId, speed: 1, emotion: 'calm' });
-        if (result.error) return toast('error', result.error);
-        currentSegments = [result]; player.setQueue([result], 'full'); renderPlayer(); await player.unlockFromGesture(); await player.play();
+        try {
+            await synthesizeAndPlayPreview({ idx: 0, type: 'narration', speaker: null, text: '梨园试音，一切顺利。', voiceId, speed: 1, emotion: 'calm' });
+        } catch (error) { toast('error', error.message); }
     });
 
     $id('ph_save_reading').addEventListener('click', () => { persistReadingForm(); saved('朗读设置'); });
@@ -1074,10 +1106,9 @@ function bindEvents() {
         const remove = event.target.closest('[data-remove-voice]');
         if (preview) {
             const voice = settings.voiceBank[Number(preview.dataset.previewVoice)];
-            const service = new TtsService(settings.tts, cache);
-            const result = await service.synthesizeSegment({ idx: 0, type: 'dialogue', speaker: voice.label, text: '你好，这是梨园音色试听。', voiceId: voice.voiceId, speed: 1, emotion: 'calm' });
-            if (result.error) return toast('error', result.error);
-            currentSegments = [result]; player.setQueue([result], 'full'); await player.unlockFromGesture(); await player.play();
+            try {
+                await synthesizeAndPlayPreview({ idx: 0, type: 'dialogue', speaker: voice.label, text: '你好，这是梨园音色试听。', voiceId: voice.voiceId, speed: 1, emotion: 'calm' });
+            } catch (error) { toast('error', error.message); }
         }
         if (remove) {
             const voice = settings.voiceBank[Number(remove.dataset.removeVoice)];
@@ -1257,3 +1288,4 @@ async function init() {
 }
 
 jQuery(init);
+

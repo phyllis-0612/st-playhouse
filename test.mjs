@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { extractTaggedContent, parseContentTags, segmentText } from './src/segmenter.js';
 import { __test as directorTest, applySoundEffects, directSegments, normalizeDirectorResult } from './src/director.js';
 import { applyVoices, clearRuntimeSpeakerMap } from './src/voicebank.js';
-import { cloneDefaults, EMOTIONS, emotionOptionsForModel, normalizeTtsEmotion, SPEECH_28_SOUND_TAGS } from './src/constants.js';
+import { cloneDefaults, EMOTIONS, emotionOptionsForModel, mergeDefaultVoiceCatalog, normalizeTtsEmotion, SPEECH_28_SOUND_TAGS, VOICE_CATALOG_VERSION } from './src/constants.js';
 import { buildTtsBody, buildTtsUrl, classifyTtsError, TtsService } from './src/tts.js';
 import { buildCloneBody, buildCloneUrl, validateCloneFile, validateVoiceId } from './src/voiceclone.js';
 import { joinApiUrl } from './src/utils.js';
@@ -106,6 +106,18 @@ try {
 
 const settings = cloneDefaults();
 assert.equal(settings.tts.model, 'speech-2.8-hd');
+assert.equal(settings.voiceCatalogVersion, VOICE_CATALOG_VERSION);
+assert.ok(settings.voiceBank.length >= 30);
+assert.ok(settings.voiceBank.some(voice => voice.voiceId === 'Chinese (Mandarin)_Gentle_Youth'));
+assert.ok(settings.fuzzyPools.male_young.includes('Chinese (Mandarin)_Gentle_Youth'));
+const migratedCatalog = mergeDefaultVoiceCatalog({
+    voiceBank: [{ voiceId: 'custom-voice', label: '自定义音色' }],
+    fuzzyPools: { male_young: ['custom-voice'] },
+});
+assert.equal(migratedCatalog.voiceBank.filter(voice => voice.voiceId === 'custom-voice').length, 1);
+assert.ok(migratedCatalog.voiceBank.some(voice => voice.voiceId === 'Chinese (Mandarin)_Warm_Girl'));
+assert.ok(migratedCatalog.fuzzyPools.male_young.includes('custom-voice'));
+assert.ok(migratedCatalog.fuzzyPools.male_young.includes('Chinese (Mandarin)_Gentle_Youth'));
 assert.equal(settings.miniPlayerVisible, true);
 assert.equal(settings.backgroundPlayback, false);
 clearRuntimeSpeakerMap();
@@ -249,6 +261,11 @@ assert.match(indexSource, /!settings\.miniPlayerVisible/);
 assert.match(indexSource, /\['ph_reread', 'ph_bar_restart'\]/);
 assert.match(indexSource, /ph_bar_hide.+hideMiniPlayer/);
 assert.match(indexSource, /prepareBackgroundForCurrent/);
+assert.match(indexSource, /function restoreReadingQueue\(\)/);
+assert.match(indexSource, /async function synthesizeAndPlayPreview\(segment\)/);
+assert.match(indexSource, /if \(page === 'read'\) restoreReadingQueue\(\)/);
+assert.match(indexSource, /readingQueueSnapshot \|\|= \{ cursor: player\.cursor, mode: player\.mode \}/);
+assert.doesNotMatch(indexSource, /currentSegments = \[(?:result|sample)\]/);
 assert.match(panelSource, /id="ph_mini_player"/);
 assert.match(panelSource, /id="ph_background_playback"/);
 assert.match(panelSource, /id="ph_cache_cleanup_mode"/);
