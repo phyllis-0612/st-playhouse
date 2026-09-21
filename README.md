@@ -1,4 +1,4 @@
-# 梨园·PlayHouse v0.4.1
+# 梨园·PlayHouse v0.5.0
 
 署名：克克姐&奶盖&鱼仔
 
@@ -49,7 +49,11 @@ MiniMax 中国区的声音复刻要求账号完成个人或企业认证。克隆
 
 ## Speech 2.8 拟声与语调
 
-- 语音服务选择 `speech-2.8-hd` 或 `speech-2.8-turbo` 时，分轨模型会同时给出克制的 `speed`、`pitch` 和拟声插入位置。
+- 分轨导演只读取当前一条 AI 消息，不读取多轮对话、用户消息或额外角色设定。
+- 分轨模型会先分析当前消息的整场气氛、紧张度、节奏和情绪走向，再逐段判断情绪置信度、强度、节奏档位、音高方向与拟声位置。
+- 梨园将 `very_slow`～`very_fast`、`lower`～`higher` 等离散导演指令稳定映射为实际语速和整数音高，减少自由数值造成的忽快忽慢。
+- 低置信度情绪不会强行传给 MiniMax，而是交给语音模型自动判断；没有明确转折时要求相邻段落保持连续。
+- 语音服务选择 `speech-2.8-hd` 或 `speech-2.8-turbo` 时支持拟声插入。
 - 支持的原生拟声标签为：`laughs`、`chuckle`、`coughs`、`clear-throat`、`groans`、`breath`、`pant`、`inhale`、`exhale`、`gasps`、`sniffs`、`sighs`、`snorts`、`burps`、`lip-smacking`、`humming`、`hissing`、`emm`、`sneezes`。
 - 梨园只接受白名单标签，且插入锚点必须逐字存在并在原段落中唯一；校验失败时保留原文，不让分轨模型改写正文。每段最多加入两个拟声标签。
 - `speech-2.6-*` 与旧版 `speech-02-*` 会自动禁用拟声标签，避免标签被当作普通文字念出。

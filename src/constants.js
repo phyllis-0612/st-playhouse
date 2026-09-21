@@ -60,7 +60,7 @@ export const SPEECH_28_SOUND_TAGS = Object.freeze([
     'sneezes',
 ]);
 
-export const DIRECTOR_SCHEMA_VERSION = 3;
+export const DIRECTOR_SCHEMA_VERSION = 4;
 
 export function supportsSpeech28SoundTags(model) {
     return model === 'speech-2.8-hd' || model === 'speech-2.8-turbo';

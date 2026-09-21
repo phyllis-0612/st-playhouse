@@ -44,6 +44,21 @@ assert.equal(directed[1].ttsText, '你好(sighs)。');
 assert.equal(directed[2].type, 'narration');
 const fractionalPitch = normalizeDirectorResult([segmented[1]], [{ idx: 1, type: 'dialogue', speaker: '楚弥', pitch: -0.5 }], { ttsModel: 'speech-2.8-hd' });
 assert.equal(fractionalPitch[0].pitch, -1);
+const atmosphericDirection = normalizeDirectorResult(segmented, {
+    scene: { mood: 'tense', tension: 3, pace: 'slow', arc: 'rising' },
+    segments: [
+        { idx: 0, type: 'narration', emotion: 'fearful', emotionConfidence: 'low', intensity: 1 },
+        { idx: 1, type: 'dialogue', speaker: '楚弥', emotion: 'fearful', emotionConfidence: 'high', intensity: 3, pace: 'fast', pitchDirection: 'lower' },
+    ],
+}, { ttsModel: 'speech-2.8-hd' });
+assert.equal(atmosphericDirection[0].sceneMood, 'tense');
+assert.equal(atmosphericDirection[0].sceneTension, 3);
+assert.equal(atmosphericDirection[0].sceneArc, 'rising');
+assert.equal(atmosphericDirection[0].emotion, '');
+assert.equal(atmosphericDirection[0].speed, 0.9);
+assert.equal(atmosphericDirection[1].emotion, 'fearful');
+assert.equal(atmosphericDirection[1].speed, 1.12);
+assert.equal(atmosphericDirection[1].pitch, -2);
 assert.equal(applySoundEffects('他说：“好。”', [{ tag: 'chuckle', position: 'before', anchor: '好' }]), '他说：“(chuckle)好。”');
 const oldModelDirected = normalizeDirectorResult(segmented, [{ idx: 1, effects: [{ tag: 'laughs', position: 'after', anchor: '你好' }] }], { ttsModel: 'speech-02-hd' });
 assert.deepEqual(oldModelDirected[1].effects, []);
@@ -52,11 +67,14 @@ assert.equal(oldModelDirected[1].ttsText, segmented[1].text);
 const duplicateDirectorOutput = '[{"idx":0,"type":"narration","speaker":"阿[甲]"}]\n[{"idx":0,"type":"dialogue","speaker":"错误副本"}]';
 assert.equal(directorTest.extractJsonArray(duplicateDirectorOutput)[0].speaker, '阿[甲]');
 assert.equal(directorTest.extractJsonArray('说明：[不是 JSON]\n```json\n[{"idx":0}]\n```')[0].idx, 0);
+assert.equal(directorTest.extractDirectorPayload('说明：```json\n{"scene":{"mood":"tender"},"segments":[{"idx":0}]}\n```').scene.mood, 'tender');
 assert.throws(() => directorTest.extractJsonArray('没有数组'), /没有返回 JSON 数组/);
 assert.equal(SPEECH_28_SOUND_TAGS.length, 19);
 assert.match(directorTest.directorPrompt([], 'speech-2.8-hd'), /laughs, chuckle/);
 assert.match(directorTest.directorPrompt([], 'speech-2.8-hd'), /没有 crying 标签/);
 assert.match(directorTest.directorPrompt([], 'speech-02-hd'), /所有 effects 必须为 \[\]/);
+assert.match(directorTest.directorPrompt([], 'speech-2.8-hd'), /只分析本次输入的当前一条消息/);
+assert.match(directorTest.directorPrompt([], 'speech-2.8-hd'), /整场气氛/);
 
 const originalFetch = globalThis.fetch;
 let directorCalls = 0;
@@ -64,8 +82,11 @@ try {
     globalThis.fetch = async (_url, options) => {
         directorCalls++;
         const request = JSON.parse(options.body);
+        const input = JSON.parse(request.messages[1].content);
+        assert.equal(input.scope, 'current_message_only');
+        assert.equal(input.segments[0].type, 'narration');
         if (directorCalls === 2) assert.match(request.messages[0].content, /严格格式模式/);
-        const content = directorCalls === 1 ? '格式错误' : '[{"idx":0,"type":"narration","speaker":null,"emotion":"calm","speed":1}]';
+        const content = directorCalls === 1 ? '格式错误' : '{"scene":{"mood":"mysterious","tension":1,"pace":"slow","arc":"steady"},"segments":[{"idx":0,"type":"narration","speaker":null,"emotion":"calm","emotionConfidence":"medium","intensity":1,"pace":"slow","pitchDirection":"natural","effects":[]}]}';
         return new Response(JSON.stringify({ choices: [{ message: { content } }] }), {
             status: 200,
             headers: { 'Content-Type': 'application/json' },
@@ -125,7 +146,7 @@ assert.equal(EMOTIONS.includes('whipser'), false);
 assert.equal(normalizeTtsEmotion('neutral', 'speech-2.8-hd'), 'calm');
 assert.deepEqual(emotionOptionsForModel('speech-2.8-hd').slice(-1), ['fluent']);
 assert.deepEqual(emotionOptionsForModel('speech-2.6-hd').slice(-2), ['fluent', 'whisper']);
-assert.match(directorTest.directorPrompt([], 'speech-2.8-hd'), /pitch 只能是整数/);
+assert.match(directorTest.directorPrompt([], 'speech-2.8-hd'), /pitchDirection/);
 assert.doesNotMatch(directorTest.directorPrompt([], 'speech-2.8-hd'), /whisper/);
 assert.match(directorTest.directorPrompt([], 'speech-2.6-hd'), /whisper/);
 assert.equal(classifyTtsError({ httpStatus: 429, message: 'too many requests' }).kind, 'rate_limit');
