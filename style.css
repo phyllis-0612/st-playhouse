@@ -111,6 +111,20 @@
 .ph-cue-editor-close { width: var(--ph-tap); height: var(--ph-tap); border: 0; background: transparent; color: var(--ph-muted); font-size: 20px; cursor: pointer; }
 .ph-cue-editor .ph-row { align-items: stretch; }
 .ph-cue-editor select { flex: 1; min-width: 0; }
+.ph-cue-params { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px; margin-bottom: 10px; }
+.ph-cue-params > div { min-width: 0; padding: 7px 8px; border-radius: 5px; background: rgb(127 127 127 / .08); }
+.ph-cue-params span, .ph-cue-params strong { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ph-cue-params span { margin-bottom: 2px; color: var(--ph-muted); font-size: 10px; }
+.ph-cue-params strong { font-size: 12px; font-weight: 600; }
+.ph-cue-request { margin: 0 0 12px; padding: 8px; border: 1px solid var(--ph-border); border-radius: 6px; font-size: 11px; }
+.ph-cue-request summary { color: var(--ph-accent); cursor: pointer; }
+.ph-cue-request dl { margin: 8px 0; }
+.ph-cue-request dl > div { display: grid; grid-template-columns: minmax(105px, .8fr) minmax(0, 1.2fr); gap: 8px; padding: 4px 0; border-bottom: 1px solid rgb(127 127 127 / .1); }
+.ph-cue-request dt { color: var(--ph-muted); }
+.ph-cue-request dd { min-width: 0; margin: 0; word-break: break-word; }
+.ph-cue-request > span { display: block; margin: 8px 0 4px; color: var(--ph-muted); }
+.ph-cue-request pre { max-height: 120px; margin: 0; padding: 7px; overflow: auto; border-radius: 5px; background: rgb(127 127 127 / .08); color: var(--ph-fg); white-space: pre-wrap; word-break: break-word; font: inherit; }
+.ph-cue-controls { margin-top: 2px; }
 .ph-cue-error-detail { margin: 0 0 9px; padding: 7px 8px; border-radius: 5px; background: rgb(207 114 86 / .08); color: #cf7256; font-size: 11px; line-height: 1.45; word-break: break-word; }
 .ph-cue-scope { margin: 8px 0 0; color: var(--ph-muted); font-size: 11px; }
 .ph-new-speaker { margin-top: 12px; padding: 11px; border: 1px dashed var(--ph-accent); border-radius: 7px; background: rgb(201 162 39 / .08); font-size: 13px; }
@@ -256,3 +270,4 @@
 }
 
 @media (prefers-reduced-motion: reduce) { .ph-panel * { transition-duration: .001ms !important; } }
+
