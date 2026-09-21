@@ -1,4 +1,4 @@
-# 梨园·PlayHouse v0.4.0
+# 梨园·PlayHouse v0.4.1
 
 署名：克克姐&奶盖&鱼仔
 
@@ -45,7 +45,7 @@ MiniMax 中国区的声音复刻要求账号完成个人或企业认证。克隆
 
 ## emotion 枚举
 
-当前限定为：`happy`、`sad`、`angry`、`fearful`、`disgusted`、`surprised`、`calm`、`whipser`。最后一个拼写来自 MiniMax 官方接口枚举，保持原样；分轨模型返回其它值时按 `calm` 处理。`fluent` 只适用于部分模型，为保证所有可选模型行为一致暂不开放。
+基础情绪限定为：`happy`、`sad`、`angry`、`fearful`、`disgusted`、`surprised`、`calm`。`fluent` 只用于 Speech 2.6/2.8，`whisper` 只用于 Speech 2.6。空值或当前模型不支持的情绪不会发送给 MiniMax，由模型自动判断；旧分轨中的误拼 `whipser` 会被兼容纠正。
 
 ## Speech 2.8 拟声与语调
 
