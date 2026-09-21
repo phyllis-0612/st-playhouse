@@ -177,12 +177,15 @@ function directorPrompt(knownSpeakers, ttsModel = '') {
     const lines = [
         '你是小说有声化表演导演。只分析本次输入的当前一条消息，不臆测前文、用户消息或未提供的角色设定。',
         '先通读全部 segments，判断整场气氛与情绪走向；再结合场景结果逐段设计表演。只返回一个 JSON 对象，不要 markdown，不要解释。',
-        '输入正文已由前端切分，type 是可靠的预切分线索。你只返回元数据，严禁返回 text/content/正文，严禁改写或复述台词。',
+        '输入正文已由前端切分，type 是前端的初步判断，你应根据上下文语义修正。旁白中出现的引用性双引号（转述、回忆、心理活动、内心独白）应标记为 narration；只有角色当场开口说出的话才标记为 dialogue。你只返回元数据，严禁返回 text/content/正文，严禁改写或复述台词。',
         `已知角色：${knownSpeakers.filter(Boolean).join('、') || '无'}。speaker 优先且严格复用已知角色名；只有明确出现新名字才新建。`,
+        '旁白引述他人话语时（如“她曾说过‘……’”、他想起那句“……”），即使有引号包裹，也应标为 narration，speaker 设为 null。判断依据是说话动作是否发生在当前场景的实时时间线上。',
+        '判断台词归属时必须同时参考前文和后文。中文小说常见“台词在前、归属动作在后”的写法（如先出现台词，下一段才写“某某说道/递过来/签下”），此时 speaker 应归属给后文中执行动作的角色，而非前一句台词的说话人。请先通读全部 segments 确定每段台词的说话人，再填写 speaker。',
         '顶层格式：{"scene":{"mood":"neutral|intimate|tender|joyful|playful|tense|suspenseful|sad|tragic|angry|fearful|solemn|urgent|mysterious","tension":0到3整数,"pace":"slow|steady|fast","arc":"rising|steady|falling|turning"},"segments":[逐段结果]}。',
         `逐段格式：{"idx":0,"type":"narration|dialogue","speaker":null或名字,"gender":"male|female|unknown","ageTag":"young|mature|child|unknown","toneTag":"clear|warm|cold|calm|deep|bright|soft|unknown","emotion":"${emotionOptions.join('|')}","emotionConfidence":"low|medium|high","intensity":0到3整数,"pace":"very_slow|slow|normal|fast|very_fast","pitchDirection":"lower|natural|higher","effects":[]}`,
         'emotion 表示可听见的主要表演情绪；潜台词不确定或混合情绪无法可靠归类时，把 emotionConfidence 设为 low，让语音模型自动判断，不要硬猜。',
         'intensity、pace、pitchDirection 必须结合整场气氛、标点、动作和情绪转折克制选择。相邻段落没有明确转折时保持连续，不要忽快忽慢或频繁升降音高。',
+        '同一角色在同一条消息内，pace 和 pitchDirection 应保持一致，除非该段有明确的情绪转折标点（感叹号、省略号、问号连用）或动作描写表明语气骤变。无明确转折时沿用该角色在本消息内的首段 pace 和 pitchDirection。',
         '旁白以讲述清晰和气氛连续为先，角色台词才突出人物情绪。无法判断时沿用 scene.pace，emotionConfidence=low、intensity=1、pitchDirection=natural、effects=[]。',
     ];
     if (soundEffectsEnabled) {
