@@ -1,4 +1,4 @@
-import { emotionOptionsForModel, normalizeTtsEmotion, SPEECH_28_SOUND_TAGS, supportsSpeech28SoundTags } from './constants.js';
+import { ELEVENLABS_AUDIO_TAGS, emotionOptionsForModel, normalizeTtsEmotion, SPEECH_28_SOUND_TAGS, supportsElevenLabsTags, supportsSpeech28SoundTags } from './constants.js';
 import { clamp, joinApiUrl } from './utils.js';
 
 const ALLOWED_GENDERS = new Set(['male', 'female', 'unknown']);
@@ -78,7 +78,7 @@ function extractJsonArray(value) {
     }
 }
 
-function normalizeSoundEffects(rawEffects, text, enabled) {
+function normalizeSoundEffects(rawEffects, text, enabled, tags = ALLOWED_SOUND_TAGS) {
     if (!enabled || !Array.isArray(rawEffects)) return [];
     const normalized = [];
     for (const item of rawEffects) {
@@ -86,21 +86,22 @@ function normalizeSoundEffects(rawEffects, text, enabled) {
         const tag = String(item?.tag ?? '').trim().toLowerCase().replace(/^\(|\)$/g, '');
         const position = item?.position === 'before' ? 'before' : 'after';
         const anchor = typeof item?.anchor === 'string' ? item.anchor.trim() : '';
-        if (!ALLOWED_SOUND_TAGS.has(tag) || !anchor) continue;
+        if (!tags.has(tag) || !anchor) continue;
         if (text.indexOf(anchor) < 0 || text.indexOf(anchor) !== text.lastIndexOf(anchor)) continue;
         normalized.push({ tag, position, anchor });
     }
     return normalized;
 }
 
-export function applySoundEffects(text, effects = []) {
+export function applySoundEffects(text, effects = [], provider = 'minimax') {
     const source = String(text ?? '');
+    const allowed = new Set(provider === 'elevenlabs' ? ELEVENLABS_AUDIO_TAGS : SPEECH_28_SOUND_TAGS);
     const insertions = effects.map((effect, order) => {
-        if (!ALLOWED_SOUND_TAGS.has(effect?.tag)) return null;
+        if (!allowed.has(effect?.tag)) return null;
         const anchor = String(effect.anchor ?? '');
         if (!anchor || source.indexOf(anchor) < 0 || source.indexOf(anchor) !== source.lastIndexOf(anchor)) return null;
         const offset = source.indexOf(anchor) + (effect.position === 'before' ? 0 : anchor.length);
-        return { offset, order, value: `(${effect.tag})` };
+        return { offset, order, value: provider === 'elevenlabs' ? `[${effect.tag}]` : `(${effect.tag})` };
     }).filter(Boolean).sort((a, b) => b.offset - a.offset || b.order - a.order);
     return insertions.reduce((result, insertion) => (
         result.slice(0, insertion.offset) + insertion.value + result.slice(insertion.offset)
@@ -116,9 +117,11 @@ function normalizeScene(raw = {}) {
     };
 }
 
-function normalizePerformance(item, scene, ttsModel) {
+function normalizePerformance(item, scene, ttsModel, provider = 'minimax') {
     const confidence = ALLOWED_CONFIDENCE.has(item?.emotionConfidence) ? item.emotionConfidence : 'medium';
-    const normalizedEmotion = normalizeTtsEmotion(item?.emotion, ttsModel);
+    const normalizedEmotion = provider === 'elevenlabs'
+        ? (['happy', 'sad', 'angry', 'fearful', 'disgusted', 'surprised', 'calm'].includes(item?.emotion) ? item.emotion : '')
+        : normalizeTtsEmotion(item?.emotion, ttsModel);
     const emotion = confidence === 'low' ? '' : normalizedEmotion;
     const intensity = Math.round(clamp(item?.intensity, 0, 3, 1));
     const pace = ALLOWED_PACES.has(item?.pace) ? item.pace : SCENE_DEFAULT_PACE[scene.pace];
@@ -130,20 +133,23 @@ function normalizePerformance(item, scene, ttsModel) {
     return { emotion, emotionConfidence: confidence, intensity, pace, speed, pitchDirection, pitch };
 }
 
-export function normalizeDirectorResult(localSegments, raw, { ttsModel = '' } = {}) {
+export function normalizeDirectorResult(localSegments, raw, { ttsModel = '', provider = 'minimax' } = {}) {
     const payload = Array.isArray(raw) ? { scene: {}, segments: raw }
         : raw && typeof raw === 'object' && Array.isArray(raw.segments) ? raw
             : extractDirectorPayload(raw);
     const parsed = payload.segments;
     const scene = normalizeScene(payload.scene);
     const byIndex = new Map(parsed.filter(item => Number.isInteger(Number(item?.idx))).map(item => [Number(item.idx), item]));
-    const soundEffectsEnabled = supportsSpeech28SoundTags(ttsModel);
+    const soundEffectsEnabled = provider === 'elevenlabs' ? supportsElevenLabsTags(ttsModel) : supportsSpeech28SoundTags(ttsModel);
+    const tags = new Set(provider === 'elevenlabs' ? ELEVENLABS_AUDIO_TAGS : SPEECH_28_SOUND_TAGS);
     return localSegments.map(local => {
         const item = byIndex.get(local.idx) ?? {};
         const dialogue = item.type === 'dialogue' || (item.type !== 'narration' && local.type === 'dialogue');
         const speaker = dialogue && typeof item.speaker === 'string' && item.speaker.trim() ? item.speaker.trim() : null;
-        const performance = normalizePerformance(item, scene, ttsModel);
-        const effects = normalizeSoundEffects(item.effects, local.text, soundEffectsEnabled);
+        const performance = normalizePerformance(item, scene, ttsModel, provider);
+        const effects = normalizeSoundEffects(item.effects, local.text, soundEffectsEnabled, tags);
+        const deliveryTag = soundEffectsEnabled && provider === 'elevenlabs' && tags.has(item.deliveryTag)
+            ? item.deliveryTag : '';
         return {
             idx: local.idx,
             type: dialogue ? 'dialogue' : 'narration',
@@ -163,14 +169,16 @@ export function normalizeDirectorResult(localSegments, raw, { ttsModel = '' } = 
             sceneTension: scene.tension,
             sceneArc: scene.arc,
             effects,
-            ttsText: applySoundEffects(local.text, effects),
+            deliveryTag,
+            ttsText: applySoundEffects(local.text, effects, provider),
         };
     });
 }
 
-function directorPrompt(knownSpeakers, ttsModel = '') {
-    const soundEffectsEnabled = supportsSpeech28SoundTags(ttsModel);
-    const emotionOptions = emotionOptionsForModel(ttsModel);
+function directorPrompt(knownSpeakers, ttsModel = '', provider = 'minimax') {
+    const eleven = provider === 'elevenlabs';
+    const soundEffectsEnabled = eleven ? supportsElevenLabsTags(ttsModel) : supportsSpeech28SoundTags(ttsModel);
+    const emotionOptions = eleven ? ['happy', 'sad', 'angry', 'fearful', 'disgusted', 'surprised', 'calm'] : emotionOptionsForModel(ttsModel);
     const lines = [
         '你是小说有声化表演导演。只分析本次输入的当前一条消息，不臆测前文、用户消息或未提供的角色设定。',
         '先通读全部 segments，判断整场气氛与情绪走向；再结合场景结果逐段设计表演。只返回一个 JSON 对象，不要 markdown，不要解释。',
@@ -179,15 +187,23 @@ function directorPrompt(knownSpeakers, ttsModel = '') {
         '旁白引述他人话语时（如“她曾说过‘……’”、他想起那句“……”），即使有引号包裹，也应标为 narration，speaker 设为 null。判断依据是说话动作是否发生在当前场景的实时时间线上。',
         '判断台词归属时必须同时参考前文和后文。中文小说常见“台词在前、归属动作在后”的写法（如先出现台词，下一段才写“某某说道/递过来/签下”），此时 speaker 应归属给后文中执行动作的角色，而非前一句台词的说话人。请先通读全部 segments 确定每段台词的说话人，再填写 speaker。',
         '顶层格式：{"scene":{"mood":"neutral|intimate|tender|joyful|playful|tense|suspenseful|sad|tragic|angry|fearful|solemn|urgent|mysterious","tension":0到3整数,"pace":"slow|steady|fast","arc":"rising|steady|falling|turning"},"segments":[逐段结果]}。',
-        `逐段格式：{"idx":0,"type":"narration|dialogue","speaker":null或名字,"gender":"male|female|unknown","ageTag":"child|young|mature|elder|unknown","toneTag":"clear|warm|cold|calm|deep|bright|soft|unknown","emotion":"${emotionOptions.join('|')}","emotionConfidence":"low|medium|high","intensity":0到3整数,"pace":"very_slow|slow|normal|fast|very_fast","effects":[]}`,
+        `逐段格式：{"idx":0,"type":"narration|dialogue","speaker":null或名字,"gender":"male|female|unknown","ageTag":"child|young|mature|elder|unknown","toneTag":"clear|warm|cold|calm|deep|bright|soft|unknown","emotion":"${emotionOptions.join('|')}","emotionConfidence":"low|medium|high","intensity":0到3整数,"pace":"very_slow|slow|normal|fast|very_fast","deliveryTag":"","effects":[]}`,
         'ageTag 表示角色稳定年龄层：幼童/儿童用 child，青年用 young，中年或成熟成人用 mature，明确的老人或高龄长辈用 elder。toneTag 表示角色长期声线气质而非本句临时情绪；可根据身份与描写选择 clear、warm、cold、calm、deep、bright、soft，无法判断用 unknown。',
         'emotion 表示可听见的主要表演情绪；潜台词不确定或混合情绪无法可靠归类时，把 emotionConfidence 设为 low，让语音模型自动判断，不要硬猜。',
         'intensity 和 pace 必须结合整场气氛、标点、动作和情绪转折克制选择。相邻段落没有明确转折时保持连续，不要忽快忽慢。',
         '同一角色在同一条消息内，pace 应保持一致，除非该段有明确的情绪转折标点（感叹号、省略号、问号连用）或动作描写表明语气骤变。无明确转折时沿用该角色在本消息内的首段 pace。',
-        '音高由梨园固定以保持同一角色音色稳定。不要输出 pitch、pitchDirection、timbre 或 voiceId；你只设计情绪、强度、语速和合法拟声。',
+        eleven
+            ? '不要输出 pitch、pitchDirection、timbre 或 voiceId。ElevenLabs 不接收 MiniMax 的 emotion/pitch 字段；只用合法方括号标签引导表演，避免过度标记。'
+            : '音高由梨园固定以保持同一角色音色稳定。不要输出 pitch、pitchDirection、timbre 或 voiceId；你只设计情绪、强度、语速和合法拟声。',
         '旁白以讲述清晰和气氛连续为先，角色台词才突出人物情绪。无法判断时沿用 scene.pace，emotionConfidence=low、intensity=1、effects=[]。',
     ];
-    if (soundEffectsEnabled) {
+    if (eleven && soundEffectsEnabled) {
+        lines.push(
+            `当前语音模型 ${ttsModel} 支持 ElevenLabs 方括号表演标签。deliveryTag 只在本段确有明确表演依据时填写，且只能用：${ELEVENLABS_AUDIO_TAGS.join(', ')}；普通旁白与低置信度情绪留空。`,
+            'effects 每项格式为 {"tag":"标签","position":"before|after","anchor":"原文中唯一出现的连续短语"}；只能选同一白名单中实际发出的轻笑、叹气等声音。不要插入环境音，也不要凭气氛虚构声音；每段最多 2 个。',
+            'anchor 必须逐字复制原文中唯一出现的短语；不可靠就返回 effects=[]。原文和正文标点不能改写。',
+        );
+    } else if (soundEffectsEnabled) {
         lines.push(
             `当前语音模型 ${ttsModel} 支持拟声标签。effects 每项格式为 {"tag":"标签","position":"before|after","anchor":"原文中唯一出现的连续短语"}。`,
             `只可使用这些精确标签：${SPEECH_28_SOUND_TAGS.join(', ')}。没有 crying 标签；哭泣用 sad，只有原文明确有抽鼻子时才可用 sniffs。`,
@@ -196,17 +212,17 @@ function directorPrompt(knownSpeakers, ttsModel = '') {
             'anchor 必须逐字复制该段原文中只出现一次的短语，用 position 指定在该短语前或后插入；没有可靠锚点就返回 effects=[]。',
         );
     } else {
-        lines.push(`当前语音模型 ${ttsModel || '未知'} 不支持 Speech 2.8 拟声标签，所有 effects 必须为 []。`);
+        lines.push(`当前语音模型 ${ttsModel || '未知'} 不支持${eleven ? ' ElevenLabs 方括号表演' : ' Speech 2.8 拟声'}标签，deliveryTag 必须为空且所有 effects 必须为 []。`);
     }
     return lines.join('\n');
 }
 
-async function requestDirector(segments, preset, knownSpeakers, url, signal, ttsModel, repair = false) {
+async function requestDirector(segments, preset, knownSpeakers, url, signal, ttsModel, provider, repair = false) {
     const messages = [
         {
             role: 'system',
             content: [
-                directorPrompt(knownSpeakers, ttsModel),
+                directorPrompt(knownSpeakers, ttsModel, provider),
                 repair ? '严格格式模式：只输出一份包含 scene 和 segments 的完整 JSON 对象。不要重复对象，不要代码围栏，不要解释或前后缀。' : '',
             ].filter(Boolean).join('\n'),
         },
@@ -232,18 +248,18 @@ async function requestDirector(segments, preset, knownSpeakers, url, signal, tts
     return payload?.choices?.[0]?.message?.content;
 }
 
-export async function directSegments(segments, preset, knownSpeakers = [], { signal, ttsModel = '' } = {}) {
+export async function directSegments(segments, preset, knownSpeakers = [], { signal, ttsModel = '', provider = 'minimax' } = {}) {
     if (!preset?.apiKey || !preset?.baseUrl || !preset?.model) throw new Error('请先完整填写分轨 API 预设');
     const url = joinApiUrl(preset.baseUrl, '/v1/chat/completions');
-    const content = await requestDirector(segments, preset, knownSpeakers, url, signal, ttsModel);
+    const content = await requestDirector(segments, preset, knownSpeakers, url, signal, ttsModel, provider);
     try {
-        return normalizeDirectorResult(segments, content, { ttsModel });
+        return normalizeDirectorResult(segments, content, { ttsModel, provider });
     } catch (error) {
         if (!(error instanceof DirectorFormatError)) throw error;
         console.warn('[梨园] 分轨模型返回格式异常，正在自动重试一次');
-        const retried = await requestDirector(segments, preset, knownSpeakers, url, signal, ttsModel, true);
+        const retried = await requestDirector(segments, preset, knownSpeakers, url, signal, ttsModel, provider, true);
         try {
-            return normalizeDirectorResult(segments, retried, { ttsModel });
+            return normalizeDirectorResult(segments, retried, { ttsModel, provider });
         } catch (retryError) {
             if (retryError instanceof DirectorFormatError) {
                 throw new DirectorFormatError('分轨模型连续两次返回了无法解析的格式，请点击“重新分轨”再试');
