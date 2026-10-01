@@ -1,6 +1,6 @@
 import { extension_settings, renderExtensionTemplateAsync } from '../../../extensions.js';
 import { AudioCache } from './src/cache.js';
-import { activeTtsSettings, activeVoiceProfile, cloneDefaults, DIRECTOR_SCHEMA_VERSION, ELEVENLABS_MODELS, emotionOptionsForModel, mergeDefaultVoiceCatalog, MODULE_NAME, SETTINGS_KEY, supportsElevenLabsTags, supportsSpeech28SoundTags, VOICE_CATALOG_VERSION } from './src/constants.js';
+import { activeTtsSettings, activeVoiceProfile, cloneDefaults, DIRECTOR_SCHEMA_VERSION, ELEVENLABS_AUDIO_TAGS, ELEVENLABS_MODELS, emotionOptionsForModel, mergeDefaultVoiceCatalog, MODULE_NAME, SETTINGS_KEY, supportsElevenLabsTags, supportsSpeech28SoundTags, VOICE_CATALOG_VERSION } from './src/constants.js';
 import { directSegments, listModels } from './src/director.js';
 import { WebAudioPlayer } from './src/player.js';
 import { extractTaggedContent, parseContentTags, segmentText } from './src/segmenter.js';
@@ -199,7 +199,7 @@ function renderCueEditor() {
     const request = buildTtsBody(item, ttsSettings());
     if (settings.tts.provider === 'elevenlabs') {
         const sameItem = editor.dataset.index === String(activeCueEditorIndex);
-        const tagOptions = ['', 'whispers', 'mischievously', 'sarcastic', 'excited', 'sad', 'angry', 'crying', 'laughs', 'sighs', 'exhales', 'gasps', 'chuckles']
+        const tagOptions = ['', ...ELEVENLABS_AUDIO_TAGS]
             .map(tag => `<option value="${tag}" ${item.deliveryTag === tag ? 'selected' : ''}>${tag || '无标签 / 自动表现'}</option>`).join('');
         const speedField = request.voice_settings.speed === undefined ? ''
             : `<label class="ph-field"><span>段落语速</span><input data-cue-speed type="number" min="0.7" max="1.2" step="0.01" value="${Number(item.speed || 1).toFixed(2)}"></label>`;
