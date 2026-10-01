@@ -38,6 +38,33 @@ export const MINIMAX_SPEECH_MODELS = Object.freeze([
     'speech-02-turbo',
 ]);
 
+export const ELEVENLABS_MODELS = Object.freeze([
+    'eleven_v4',
+    'eleven_v4_turbo',
+    'eleven_v3',
+    'eleven_multilingual_v2',
+    'eleven_flash_v2_5',
+]);
+
+export const ELEVENLABS_AUDIO_TAGS = Object.freeze([
+    'whispers', 'mischievously', 'sarcastic', 'excited', 'sad', 'angry',
+    'crying', 'laughs', 'sighs', 'exhales', 'gasps', 'chuckles',
+]);
+
+export function supportsElevenLabsTags(model) {
+    return ['eleven_v4', 'eleven_v4_turbo', 'eleven_v3'].includes(model);
+}
+
+export function activeTtsSettings(settings) {
+    return settings.tts.provider === 'elevenlabs'
+        ? { ...settings.tts.elevenlabs, provider: 'elevenlabs', globalSpeed: settings.tts.globalSpeed }
+        : { ...settings.tts, provider: 'minimax' };
+}
+
+export function activeVoiceProfile(settings) {
+    return settings.tts.provider === 'elevenlabs' ? settings.elevenLabsVoices : settings;
+}
+
 export const SPEECH_28_SOUND_TAGS = Object.freeze([
     'laughs',
     'chuckle',
@@ -93,6 +120,22 @@ export const DEFAULT_SETTINGS = Object.freeze({
         model: 'speech-2.8-hd',
         concurrency: 3,
         globalSpeed: 1,
+        elevenlabs: {
+            baseUrl: 'https://api.elevenlabs.io',
+            apiKey: '',
+            model: 'eleven_v4',
+            outputFormat: 'mp3_44100_128',
+            stability: 0.5,
+            similarityBoost: 0.75,
+            concurrency: 2,
+        },
+    },
+    elevenLabsVoices: {
+        voiceBank: [],
+        fuzzyPools: {},
+        narratorVoiceId: '',
+        fallbackVoiceId: '',
+        bindings: {},
     },
     voiceCatalogVersion: VOICE_CATALOG_VERSION,
     modelLists: {},
