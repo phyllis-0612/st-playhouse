@@ -1,13 +1,13 @@
 import { extension_settings, renderExtensionTemplateAsync } from '../../../extensions.js';
 import { AudioCache } from './src/cache.js';
-import { cloneDefaults, DIRECTOR_SCHEMA_VERSION, emotionOptionsForModel, mergeDefaultVoiceCatalog, MODULE_NAME, SETTINGS_KEY, supportsSpeech28SoundTags, VOICE_CATALOG_VERSION } from './src/constants.js';
+import { activeTtsSettings, activeVoiceProfile, cloneDefaults, DIRECTOR_SCHEMA_VERSION, ELEVENLABS_MODELS, emotionOptionsForModel, mergeDefaultVoiceCatalog, MODULE_NAME, SETTINGS_KEY, supportsElevenLabsTags, supportsSpeech28SoundTags, VOICE_CATALOG_VERSION } from './src/constants.js';
 import { directSegments, listModels } from './src/director.js';
 import { WebAudioPlayer } from './src/player.js';
 import { extractTaggedContent, parseContentTags, segmentText } from './src/segmenter.js';
 import { buildTtsBody, TtsService } from './src/tts.js';
 import { readAudioDuration, validateCloneFile, validateVoiceId, VoiceCloneService } from './src/voiceclone.js';
 import { applyVoices, bindSpeaker, clearRuntimeSpeakerMap, getNewSpeakers } from './src/voicebank.js';
-import { assertSecureUrl, clamp, escapeHtml, hashString, mergeDefaults } from './src/utils.js';
+import { assertSecureUrl, clamp, escapeHtml, hashString, joinApiUrl, mergeDefaults } from './src/utils.js';
 
 const context = () => SillyTavern.getContext();
 let settings;
@@ -27,6 +27,9 @@ let readingQueueSnapshot = null;
 
 const $id = id => document.getElementById(id);
 const toast = (type, message, title = '梨园') => globalThis.toastr?.[type]?.(message, title) ?? console[type === 'error' ? 'error' : 'log'](`[${title}] ${message}`);
+const voiceProfile = () => activeVoiceProfile(settings);
+const ttsSettings = () => activeTtsSettings(settings);
+const ttsName = () => settings.tts.provider === 'elevenlabs' ? 'ElevenLabs' : 'MiniMax';
 
 function saveSettings() {
     context().saveSettingsDebounced?.();
@@ -91,7 +94,7 @@ function knownSpeakers(message = getMessage()) {
             if (character?.name) names.add(character.name);
         }
     }
-    const binding = settings.bindings?.[getCardKey(message)];
+    const binding = voiceProfile().bindings?.[getCardKey(message)];
     names.add(binding?.main?.speaker);
     for (const extra of binding?.extras ?? []) names.add(extra?.speaker);
     return [...names].filter(Boolean);
@@ -127,7 +130,11 @@ function renderTarget() {
         ? (extracted?.text.replace(/\s+/g, ' ').slice(0, 180) || `未找到正文标签：${extracted?.tags.map(tag => `<${tag}>`).join('、')}`)
         : '打开一个聊天，然后选择 AI 消息。';
     const saved = context().chatMetadata?.playhouse?.tracks?.[targetMessageId];
-    const savedMatchesSource = Boolean(extracted?.text && saved?.sourceText === extracted.text);
+    const activeTts = ttsSettings();
+    const savedMatchesSource = Boolean(extracted?.text && saved?.sourceText === extracted.text
+        && saved?.directorSchemaVersion === DIRECTOR_SCHEMA_VERSION
+        && saved?.ttsModel === activeTts.model
+        && (saved?.ttsProvider || 'minimax') === activeTts.provider);
     const segments = currentSegments.length && targetMessageId === Number($id('ph_track_view')?.dataset.messageId) ? currentSegments : savedMatchesSource ? saved?.segments : null;
     if (segments?.length) {
         currentSegments = segments;
@@ -141,6 +148,17 @@ function renderTarget() {
         $id('ph_process').hidden = !message;
     }
     renderBindings();
+}
+
+function clearActiveTrack() {
+    pipelineController?.abort();
+    regenerationController?.abort();
+    previewGeneration++;
+    previewActive = false;
+    readingQueueSnapshot = null;
+    currentSegments = [];
+    player.setQueue([], settings.narrationMode);
+    renderTarget();
 }
 
 function renderSegments() {
@@ -178,12 +196,24 @@ function renderCueEditor() {
     const sameSpeakerCount = item.type === 'dialogue' && item.speaker
         ? currentSegments.filter(segment => segment.type === 'dialogue' && segment.speaker === item.speaker).length
         : 0;
-    const request = buildTtsBody(item, settings.tts);
+    const request = buildTtsBody(item, ttsSettings());
+    if (settings.tts.provider === 'elevenlabs') {
+        const sameItem = editor.dataset.index === String(activeCueEditorIndex);
+        const tagOptions = ['', 'whispers', 'mischievously', 'sarcastic', 'excited', 'sad', 'angry', 'crying', 'laughs', 'sighs', 'exhales', 'gasps', 'chuckles']
+            .map(tag => `<option value="${tag}" ${item.deliveryTag === tag ? 'selected' : ''}>${tag || '无标签 / 自动表现'}</option>`).join('');
+        const speedField = request.voice_settings.speed === undefined ? ''
+            : `<label class="ph-field"><span>段落语速</span><input data-cue-speed type="number" min="0.7" max="1.2" step="0.01" value="${Number(item.speed || 1).toFixed(2)}"></label>`;
+        editor.hidden = false;
+        editor.dataset.index = String(activeCueEditorIndex);
+        editor.innerHTML = `<div class="ph-cue-editor-head"><div><strong>第 ${activeCueEditorIndex + 1} 段 · ${escapeHtml(item.speaker || '旁白')}</strong><small>${escapeHtml(item.text)}</small></div><button type="button" class="ph-cue-editor-close" data-cue-close aria-label="关闭调整">×</button></div>${item.error ? `<p class="ph-cue-error-detail">${escapeHtml(item.error)}</p>` : ''}<div class="ph-cue-params"><div><span>模型</span><strong>${escapeHtml(request.model_id)}</strong></div><div><span>音色</span><strong>${escapeHtml(item.voiceId)}</strong></div><div><span>Stability</span><strong>${request.voice_settings.stability}</strong></div><div><span>Similarity</span><strong>${request.voice_settings.similarity_boost}</strong></div></div><details class="ph-cue-request"><summary>实际送入 ElevenLabs 的文本</summary><pre>${escapeHtml(request.text)}</pre></details><div class="ph-grid-two ph-cue-controls"><label class="ph-field ph-span-two"><span>重新合成使用的音色</span><select data-cue-voice>${voiceOptions(item.voiceId, false)}</select></label><label class="ph-field"><span>表演标签</span><select data-cue-delivery>${tagOptions}</select></label>${speedField}</div><div class="ph-row"><button type="button" class="ph-btn ph-primary" data-regenerate-one>按以上参数重新生成</button>${sameSpeakerCount ? `<button type="button" class="ph-btn" data-regenerate-speaker>仅替换该角色音色 · ${sameSpeakerCount} 段</button>` : ''}</div><p class="ph-cue-scope">v4 不提供 speed 参数；切换模型后请重新分轨。更换音色会产生新的合成费用。</p>`;
+        if (!sameItem) editor.scrollIntoView({ block: 'nearest' });
+        return;
+    }
     const voiceSetting = request.voice_setting;
     const emotionLabels = { happy: '开心', sad: '悲伤', angry: '愤怒', fearful: '恐惧', disgusted: '厌恶', surprised: '惊讶', calm: '平静', fluent: '流畅', whisper: '耳语' };
     const emotionOptions = [
         `<option value="" ${item.emotion ? '' : 'selected'}>自动判断（不发送）</option>`,
-        ...emotionOptionsForModel(settings.tts.model).map(value => `<option value="${value}" ${item.emotion === value ? 'selected' : ''}>${emotionLabels[value] || value} · ${value}</option>`),
+        ...emotionOptionsForModel(ttsSettings().model).map(value => `<option value="${value}" ${item.emotion === value ? 'selected' : ''}>${emotionLabels[value] || value} · ${value}</option>`),
     ].join('');
     const effectLabels = item.effects?.length
         ? item.effects.map(effect => `${effect.tag} · ${effect.position === 'before' ? '前置' : '后置'}「${effect.anchor}」`).join('；')
@@ -304,12 +334,14 @@ async function processMessage(messageId, { forceDirector = false, autoPlay = tru
     const message = getMessage(messageId);
     if (!message) return;
     if (!settings.enabled) return toast('info', '梨园目前是关闭的');
+    const tts = ttsSettings();
+    const profile = voiceProfile();
     try {
         assertSecureUrl(activePreset()?.baseUrl);
-        assertSecureUrl(settings.tts.baseUrl);
+        assertSecureUrl(tts.baseUrl);
         if (!activePreset()?.apiKey) throw new Error('请先填写分轨 API Key');
-        if (!settings.tts.apiKey) throw new Error('请先填写 MiniMax API Key');
-        if (!settings.voiceBank.length || !settings.fallbackVoiceId) throw new Error('请先在音色页设置至少一个音色和兜底音色');
+        if (!tts.apiKey) throw new Error(`请先填写 ${ttsName()} API Key`);
+        if (!profile.voiceBank.length || !profile.fallbackVoiceId) throw new Error('请先在音色页设置至少一个音色和兜底音色');
     } catch (error) {
         openPanel('settings');
         toast('error', error.message);
@@ -334,7 +366,8 @@ async function processMessage(messageId, { forceDirector = false, autoPlay = tru
     let segments = !forceDirector
         && savedTrack?.sourceText === extracted.text
         && savedTrack?.directorSchemaVersion === DIRECTOR_SCHEMA_VERSION
-        && savedTrack?.ttsModel === settings.tts.model
+        && savedTrack?.ttsModel === tts.model
+        && (savedTrack?.ttsProvider || 'minimax') === tts.provider
         ? savedTrack.segments
         : null;
     try {
@@ -342,7 +375,8 @@ async function processMessage(messageId, { forceDirector = false, autoPlay = tru
             $id('ph_target_status').textContent = `正在分轨 · ${local.length} 段…`;
             segments = await directSegments(local, activePreset(), knownSpeakers(message), {
                 signal: pipelineController.signal,
-                ttsModel: settings.tts.model,
+                ttsModel: tts.model,
+                provider: tts.provider,
             });
             segments = applyVoices(segments, settings, getCardKey(message));
             metadata.playhouse.tracks[messageId] = {
@@ -350,7 +384,8 @@ async function processMessage(messageId, { forceDirector = false, autoPlay = tru
                 sourceText: extracted.text,
                 matchedTags: extracted.matchedTags,
                 directorSchemaVersion: DIRECTOR_SCHEMA_VERSION,
-                ttsModel: settings.tts.model,
+                ttsModel: tts.model,
+                ttsProvider: tts.provider,
                 updatedAt: Date.now(),
             };
             context().saveMetadataDebounced?.();
@@ -360,7 +395,7 @@ async function processMessage(messageId, { forceDirector = false, autoPlay = tru
         currentSegments = segments;
         renderSegments();
         $id('ph_target_status').textContent = `正在合成 · 0/${segments.length}`;
-        const service = new TtsService(settings.tts, cache);
+        const service = new TtsService(tts, cache);
         let completed = 0;
         const results = await Promise.all(segments.map(async segment => {
             const result = await service.synthesizeSegment(segment, {
@@ -409,6 +444,7 @@ function persistTrackSegmentParameters(indices) {
         else delete stored.voiceOverride;
         stored.speed = current.speed;
         stored.emotion = current.emotion;
+        stored.deliveryTag = current.deliveryTag;
         stored.manualParameters = Boolean(current.manualParameters);
     }
     track.updatedAt = Date.now();
@@ -433,6 +469,7 @@ async function regenerateSegments(indices, { voiceId = '', overrides = null, rea
         if (voiceId) item.voiceId = voiceId;
         if (overrides && Object.prototype.hasOwnProperty.call(overrides, 'speed')) item.speed = clamp(overrides.speed, 0.5, 2, item.speed || 1);
         if (overrides && Object.prototype.hasOwnProperty.call(overrides, 'emotion')) item.emotion = String(overrides.emotion || '');
+        if (overrides && Object.prototype.hasOwnProperty.call(overrides, 'deliveryTag')) item.deliveryTag = String(overrides.deliveryTag || '');
         if (overrides) item.manualParameters = true;
         item.regenerating = true;
         item.retryMessage = '生成中…';
@@ -440,7 +477,7 @@ async function regenerateSegments(indices, { voiceId = '', overrides = null, rea
     persistTrackSegmentParameters(unique);
     renderSegments();
     $id('ph_target_status').textContent = `${reason} · 0/${unique.length}`;
-    const service = new TtsService(settings.tts, cache);
+    const service = new TtsService(ttsSettings(), cache);
     let completed = 0;
     try {
         const results = await Promise.all(unique.map(async index => {
@@ -483,10 +520,12 @@ function selectedCueVoice() {
 
 function selectedCueParameters() {
     const editor = $id('ph_cue_editor');
-    return {
-        speed: editor.querySelector('[data-cue-speed]')?.value,
-        emotion: editor.querySelector('[data-cue-emotion]')?.value || '',
-    };
+    if (settings.tts.provider === 'elevenlabs') {
+        const parameters = { deliveryTag: editor.querySelector('[data-cue-delivery]')?.value || '' };
+        if (editor.querySelector('[data-cue-speed]')) parameters.speed = editor.querySelector('[data-cue-speed]').value;
+        return parameters;
+    }
+    return { speed: editor.querySelector('[data-cue-speed]')?.value, emotion: editor.querySelector('[data-cue-emotion]')?.value || '' };
 }
 
 async function regenerateActiveCue() {
@@ -503,10 +542,10 @@ async function regenerateActiveSpeaker() {
     const indices = currentSegments.map((segment, index) => ({ segment, index }))
         .filter(entry => entry.segment.type === 'dialogue' && entry.segment.speaker === item.speaker)
         .map(entry => entry.index);
-    if (!globalThis.confirm(`将把「${item.speaker}」替换为新音色，并重新合成 ${indices.length} 段台词。\n\n这会产生新的 MiniMax 合成费用，确定继续吗？`)) return;
+    if (!globalThis.confirm(`将把「${item.speaker}」替换为新音色，并重新合成 ${indices.length} 段台词。\n\n这会产生新的 ${ttsName()} 合成费用，确定继续吗？`)) return;
     const cardKey = getCardKey();
     bindSpeaker(settings, cardKey, item.speaker, voiceId);
-    const binding = settings.bindings?.[cardKey];
+    const binding = voiceProfile().bindings?.[cardKey];
     const bound = binding?.main?.speaker === item.speaker ? binding.main : binding?.extras?.find(entry => entry.speaker === item.speaker);
     if (bound) bound.speed ||= 1;
     saveSettings();
@@ -592,7 +631,7 @@ function restoreReadingQueue() {
 async function synthesizeAndPlayPreview(segment) {
     readingQueueSnapshot ||= { cursor: player.cursor, mode: player.mode };
     const generation = ++previewGeneration;
-    const service = new TtsService(settings.tts, cache);
+    const service = new TtsService(ttsSettings(), cache);
     const result = await service.synthesizeSegment(segment);
     if (result.error) throw new Error(result.error);
     if (generation !== previewGeneration) return result;
@@ -627,7 +666,7 @@ function cycleTheme() {
 
 function voiceOptions(selected = '', includeEmpty = false) {
     const head = includeEmpty ? '<option value="">自动挑 / 不覆盖</option>' : '';
-    return head + settings.voiceBank.map(voice => `<option value="${escapeHtml(voice.voiceId)}" ${voice.voiceId === selected ? 'selected' : ''}>${escapeHtml(voice.label || voice.voiceId)}</option>`).join('');
+    return head + voiceProfile().voiceBank.map(voice => `<option value="${escapeHtml(voice.voiceId)}" ${voice.voiceId === selected ? 'selected' : ''}>${escapeHtml(voice.label || voice.voiceId)}</option>`).join('');
 }
 
 function fillVoiceSelect(id, selected, includeEmpty = false) {
@@ -639,25 +678,28 @@ function fillVoiceSelect(id, selected, includeEmpty = false) {
 
 function renderBindings() {
     const cardKey = getCardKey();
-    const binding = settings.bindings?.[cardKey] ?? { main: null, extras: [], narrator: '' };
+    const binding = voiceProfile().bindings?.[cardKey] ?? { main: null, extras: [], narrator: '' };
     $id('ph_binding_key').textContent = `索引：${cardKey}`;
     $id('ph_main_speaker').value = binding.main?.speaker || getMessage()?.name || '';
     fillVoiceSelect('ph_main_voice', binding.main?.voiceId || '', true);
     fillVoiceSelect('ph_card_narrator', binding.narrator || '', true);
     fillVoiceSelect('ph_extra_voice', '', false);
-    $id('ph_extras').innerHTML = (binding.extras ?? []).map((item, index) => `<div class="ph-card"><div><strong>${escapeHtml(item.speaker)}</strong><small>${escapeHtml(settings.voiceBank.find(voice => voice.voiceId === item.voiceId)?.label || item.voiceId)}</small></div><button type="button" data-remove-extra="${index}" aria-label="移除"><i class="fa-solid fa-trash"></i></button></div>`).join('') || '<p class="ph-hint">还没有常驻配角。</p>';
+    $id('ph_extras').innerHTML = (binding.extras ?? []).map((item, index) => `<div class="ph-card"><div><strong>${escapeHtml(item.speaker)}</strong><small>${escapeHtml(voiceProfile().voiceBank.find(voice => voice.voiceId === item.voiceId)?.label || item.voiceId)}</small></div><button type="button" data-remove-extra="${index}" aria-label="移除"><i class="fa-solid fa-trash"></i></button></div>`).join('') || '<p class="ph-hint">还没有常驻配角。</p>';
 }
 
 function renderVoiceBank() {
+    $id('ph_voice_provider_label').textContent = ttsName();
+    $id('ph_import_eleven_voices').hidden = settings.tts.provider !== 'elevenlabs';
+    $id('ph_clone_voice_group').hidden = settings.tts.provider === 'elevenlabs';
     const builtinIds = new Set(cloneDefaults().voiceBank.map(voice => voice.voiceId));
-    const entries = settings.voiceBank.map((voice, index) => ({ voice, index }));
+    const entries = voiceProfile().voiceBank.map((voice, index) => ({ voice, index }));
     const renderCards = list => list.map(({ voice, index }) => `<div class="ph-card"><div><strong>${escapeHtml(voice.label || voice.voiceId)}</strong><small>${escapeHtml([voice.gender, voice.ageTag, voice.toneTag, voice.voiceId].filter(Boolean).join(' · '))}</small></div><button type="button" data-preview-voice="${index}" aria-label="试听"><i class="fa-solid fa-play"></i></button><button type="button" data-remove-voice="${index}" aria-label="删除"><i class="fa-solid fa-trash"></i></button></div>`).join('');
     const mine = entries.filter(({ voice }) => !builtinIds.has(voice.voiceId));
     const builtin = entries.filter(({ voice }) => builtinIds.has(voice.voiceId));
     $id('ph_voice_list').innerHTML = `<details class="ph-voice-section" open><summary>我的音色 <span>${mine.length} 个</span></summary><div>${renderCards(mine) || '<p class="ph-hint">还没有克隆或手动添加的音色。</p>'}</div></details><details class="ph-voice-section"><summary>插件内置音色 <span>${builtin.length} 个</span></summary><div>${renderCards(builtin) || '<p class="ph-hint">没有内置音色。</p>'}</div></details>`;
-    for (const id of ['ph_narrator', 'ph_fallback']) fillVoiceSelect(id, id === 'ph_narrator' ? settings.narratorVoiceId : settings.fallbackVoiceId, true);
+    for (const id of ['ph_narrator', 'ph_fallback']) fillVoiceSelect(id, id === 'ph_narrator' ? voiceProfile().narratorVoiceId : voiceProfile().fallbackVoiceId, true);
     const labels = { male_child: '男 · 儿童', female_child: '女 · 儿童', male_young: '男 · 青年', female_young: '女 · 青年', male_mature: '男 · 成熟', female_mature: '女 · 成熟', male_elder: '男 · 老年', female_elder: '女 · 老年', child: '儿童 · 性别未知', unknown: '无法判断 / 特殊角色' };
-    $id('ph_pool_fields').innerHTML = Object.entries(labels).map(([key, label]) => `<label class="ph-pool-field"><span>${label}</span><select multiple data-pool="${key}">${settings.voiceBank.map(voice => `<option value="${escapeHtml(voice.voiceId)}" ${(settings.fuzzyPools?.[key] ?? []).includes(voice.voiceId) ? 'selected' : ''}>${escapeHtml(voice.label || voice.voiceId)}</option>`).join('')}</select></label>`).join('');
+    $id('ph_pool_fields').innerHTML = Object.entries(labels).map(([key, label]) => `<label class="ph-pool-field"><span>${label}</span><select multiple data-pool="${key}">${voiceProfile().voiceBank.map(voice => `<option value="${escapeHtml(voice.voiceId)}" ${(voiceProfile().fuzzyPools?.[key] ?? []).includes(voice.voiceId) ? 'selected' : ''}>${escapeHtml(voice.label || voice.voiceId)}</option>`).join('')}</select></label>`).join('');
 }
 
 function modelOptions(preset) {
@@ -717,12 +759,21 @@ function renderSettings() {
     $id('ph_gap_speaker').value = settings.gapMs.speakerSwitch;
     $id('ph_read_summary').textContent = settings.trigger === 'auto' ? '自动' : '手动';
     renderPreset();
+    $id('ph_tts_provider').value = settings.tts.provider;
+    $id('ph_tts_provider_summary').textContent = ttsName();
+    $id('ph_minimax_fields').hidden = settings.tts.provider === 'elevenlabs';
+    $id('ph_eleven_fields').hidden = settings.tts.provider !== 'elevenlabs';
     $id('ph_tts_url').value = settings.tts.baseUrl;
     $id('ph_tts_key').value = settings.tts.apiKey;
     $id('ph_tts_group').value = settings.tts.groupId;
     $id('ph_tts_model').value = settings.tts.model;
+    $id('ph_eleven_url').value = settings.tts.elevenlabs.baseUrl;
+    $id('ph_eleven_key').value = settings.tts.elevenlabs.apiKey;
+    $id('ph_eleven_model').value = settings.tts.elevenlabs.model;
+    $id('ph_eleven_stability').value = settings.tts.elevenlabs.stability;
+    $id('ph_eleven_similarity').value = settings.tts.elevenlabs.similarityBoost;
     updateTtsModelHint();
-    $id('ph_concurrency').value = settings.tts.concurrency;
+    $id('ph_concurrency').value = ttsSettings().concurrency;
     $id('ph_cache_enabled').checked = settings.cache.enabled;
     $id('ph_cache_max').value = settings.cache.maxMB;
     $id('ph_cache_cleanup_mode').value = settings.cache.cleanupMode;
@@ -744,6 +795,13 @@ function updateTtsModelHint() {
     $id('ph_tts_model_hint').textContent = supportsSpeech28SoundTags(model)
         ? '支持 19 种原生拟声标签；分轨模型会在原文明示声音时自动、克制地插入。'
         : '该模型不支持 Speech 2.8 拟声标签；分轨结果会自动关闭拟声标注。';
+    const elevenModel = $id('ph_eleven_model').value;
+    $id('ph_eleven_model_hint').textContent = supportsElevenLabsTags(elevenModel)
+        ? (elevenModel.startsWith('eleven_v4') ? '用方括号标签控制表演；v4 不发送 speed，节奏由标点和标签引导。' : '用方括号标签控制表演；语速支持 0.7–1.2。')
+        : '该模型不支持方括号表演标签，分轨只判断角色与节奏，不注入标签。';
+    const noSpeed = settings.tts.provider === 'elevenlabs' && elevenModel.startsWith('eleven_v4');
+    $id('ph_global_speed').disabled = noSpeed;
+    $id('ph_global_speed_out').textContent = noSpeed ? 'v4 不支持' : `${Number(settings.tts.globalSpeed).toFixed(2)}×`;
 }
 
 function renderCacheCleanupMode() {
@@ -766,12 +824,60 @@ function persistPresetForm() {
 }
 
 function persistTtsForm() {
-    settings.tts.baseUrl = $id('ph_tts_url').value.trim();
-    settings.tts.apiKey = $id('ph_tts_key').value.trim();
-    settings.tts.groupId = $id('ph_tts_group').value.trim();
-    settings.tts.model = $id('ph_tts_model').value;
-    settings.tts.concurrency = clamp($id('ph_concurrency').value, 1, 8, 3);
+    const eleven = settings.tts.provider === 'elevenlabs';
+    const target = eleven ? settings.tts.elevenlabs : settings.tts;
+    if (eleven) {
+        target.baseUrl = $id('ph_eleven_url').value.trim();
+        target.apiKey = $id('ph_eleven_key').value.trim();
+        target.model = ELEVENLABS_MODELS.includes($id('ph_eleven_model').value)
+            ? $id('ph_eleven_model').value : 'eleven_v4';
+        target.stability = clamp($id('ph_eleven_stability').value, 0, 1, 0.5);
+        target.similarityBoost = clamp($id('ph_eleven_similarity').value, 0, 1, 0.75);
+    } else {
+        target.baseUrl = $id('ph_tts_url').value.trim();
+        target.apiKey = $id('ph_tts_key').value.trim();
+        target.groupId = $id('ph_tts_group').value.trim();
+        target.model = $id('ph_tts_model').value;
+    }
+    target.concurrency = clamp($id('ph_concurrency').value, 1, 8, eleven ? 2 : 3);
     saveSettings();
+}
+
+async function importElevenLabsVoices() {
+    persistTtsForm();
+    const config = settings.tts.elevenlabs;
+    if (!config.apiKey) throw new Error('请先填写 ElevenLabs API Key');
+    assertSecureUrl(config.baseUrl);
+    const profile = voiceProfile();
+    let token = '';
+    let added = 0;
+    for (let page = 0; page < 10; page++) {
+        const url = new URL(joinApiUrl(config.baseUrl, '/v2/voices'));
+        url.searchParams.set('page_size', '100');
+        if (token) url.searchParams.set('next_page_token', token);
+        const response = await fetch(url, { headers: { 'xi-api-key': config.apiKey } });
+        const payload = await response.json().catch(() => null);
+        if (!response.ok) throw new Error(payload?.detail?.message || payload?.detail || `ElevenLabs 音色列表 HTTP ${response.status}`);
+        for (const voice of payload?.voices ?? []) {
+            if (!voice.voice_id || profile.voiceBank.some(item => item.voiceId === voice.voice_id)) continue;
+            profile.voiceBank.push({
+                voiceId: voice.voice_id,
+                label: voice.name || voice.voice_id,
+                gender: ['male', 'female'].includes(voice.labels?.gender) ? voice.labels.gender : 'unknown',
+                ageTag: 'unknown',
+                toneTag: 'unknown',
+                note: 'ElevenLabs 音色',
+            });
+            added++;
+        }
+        if (!payload?.has_more || !payload.next_page_token || payload.next_page_token === token) break;
+        token = payload.next_page_token;
+    }
+    if (!profile.fallbackVoiceId && profile.voiceBank.length) profile.fallbackVoiceId = profile.voiceBank[0].voiceId;
+    saveSettings();
+    renderVoiceBank();
+    renderBindings();
+    return added;
 }
 
 function persistReadingForm() {
@@ -797,10 +903,10 @@ function persistReadingForm() {
 }
 
 function persistVoiceDefaults() {
-    settings.narratorVoiceId = $id('ph_narrator').value;
-    settings.fallbackVoiceId = $id('ph_fallback').value;
+    voiceProfile().narratorVoiceId = $id('ph_narrator').value;
+    voiceProfile().fallbackVoiceId = $id('ph_fallback').value;
     for (const select of $id('ph_pool_fields').querySelectorAll('[data-pool]')) {
-        settings.fuzzyPools[select.dataset.pool] = [...select.selectedOptions].map(option => option.value);
+        voiceProfile().fuzzyPools[select.dataset.pool] = [...select.selectedOptions].map(option => option.value);
     }
     clearRuntimeSpeakerMap();
     saveSettings();
@@ -819,11 +925,11 @@ function persistCacheForm() {
 
 function saveBindingMain() {
     const cardKey = getCardKey();
-    settings.bindings[cardKey] ||= { main: null, extras: [], narrator: '' };
+    voiceProfile().bindings[cardKey] ||= { main: null, extras: [], narrator: '' };
     const speaker = $id('ph_main_speaker').value.trim();
     const voiceId = $id('ph_main_voice').value;
-    settings.bindings[cardKey].main = speaker && voiceId ? { speaker, voiceId, speed: 1 } : null;
-    settings.bindings[cardKey].narrator = $id('ph_card_narrator').value;
+    voiceProfile().bindings[cardKey].main = speaker && voiceId ? { speaker, voiceId, speed: 1 } : null;
+    voiceProfile().bindings[cardKey].narrator = $id('ph_card_narrator').value;
     clearRuntimeSpeakerMap();
     saveSettings();
 }
@@ -836,7 +942,7 @@ async function cloneVoiceFromForm() {
     try {
         voiceId = validateVoiceId($id('ph_clone_voice_id').value);
         validateCloneFile(file);
-        if (settings.voiceBank.some(voice => voice.voiceId === voiceId)) throw new Error('这个 Voice ID 已经在音色库里');
+        if (voiceProfile().voiceBank.some(voice => voice.voiceId === voiceId)) throw new Error('这个 Voice ID 已经在音色库里');
         persistTtsForm();
         assertSecureUrl(settings.tts.baseUrl);
     } catch (error) {
@@ -865,7 +971,7 @@ async function cloneVoiceFromForm() {
             toneTag: $id('ph_clone_tone').value.trim() || 'unknown',
             note: 'MiniMax 克隆音色',
         };
-        settings.voiceBank.push(voice);
+        voiceProfile().voiceBank.push(voice);
         saveSettings();
         let activated = false;
         if ($id('ph_clone_activate').checked) {
@@ -886,7 +992,7 @@ async function cloneVoiceFromForm() {
         toast('success', `音色 ${voice.voiceId} 已加入音色库`);
     } catch (error) {
         if (error.name !== 'AbortError') {
-            const alreadyCreated = settings.voiceBank.some(voice => voice.voiceId === voiceId);
+            const alreadyCreated = voiceProfile().voiceBank.some(voice => voice.voiceId === voiceId);
             const message = alreadyCreated ? `${error.message}；音色已保留在音色库，可稍后点试听完成激活` : error.message;
             setCloneStatus(message, alreadyCreated ? 'success' : 'error');
             renderVoiceBank();
@@ -1067,20 +1173,47 @@ function bindEvents() {
     $id('ph_director_test').addEventListener('click', async () => {
         persistPresetForm();
         try {
-            const result = await directSegments(segmentText('夜色很静。“你好。”'), activePreset(), ['测试角色'], { ttsModel: settings.tts.model });
+            const result = await directSegments(segmentText('夜色很静。“你好。”'), activePreset(), ['测试角色'], {
+                ttsModel: ttsSettings().model, provider: ttsSettings().provider,
+            });
             toast('success', `连接成功，返回 ${result.length} 段`);
         } catch (error) { toast('error', error.message); }
     });
 
     for (const id of ['ph_tts_url', 'ph_tts_key', 'ph_tts_group', 'ph_tts_model', 'ph_concurrency']) {
         $id(id).addEventListener('change', () => {
+            const previousModel = settings.tts.model;
             persistTtsForm();
             if (id === 'ph_tts_model') updateTtsModelHint();
+            if (previousModel !== settings.tts.model) clearActiveTrack();
         });
     }
+    for (const id of ['ph_eleven_url', 'ph_eleven_key', 'ph_eleven_model', 'ph_eleven_stability', 'ph_eleven_similarity']) {
+        $id(id).addEventListener('change', () => {
+            const previousModel = settings.tts.elevenlabs.model;
+            persistTtsForm();
+            updateTtsModelHint();
+            if (previousModel !== settings.tts.elevenlabs.model) clearActiveTrack();
+        });
+    }
+    $id('ph_tts_provider').addEventListener('change', event => {
+        persistTtsForm();
+        settings.tts.provider = event.target.value === 'elevenlabs' ? 'elevenlabs' : 'minimax';
+        clearRuntimeSpeakerMap();
+        saveSettings();
+        clearActiveTrack();
+        renderSettings();
+    });
+    $id('ph_import_eleven_voices').addEventListener('click', async () => {
+        const button = $id('ph_import_eleven_voices');
+        button.disabled = true;
+        try { toast('success', `已加入 ${await importElevenLabsVoices()} 把新音色`); }
+        catch (error) { toast('error', error.message); }
+        finally { button.disabled = false; }
+    });
     $id('ph_tts_test').addEventListener('click', async () => {
         persistTtsForm();
-        const voiceId = settings.narratorVoiceId || settings.fallbackVoiceId;
+        const voiceId = voiceProfile().narratorVoiceId || voiceProfile().fallbackVoiceId;
         if (!voiceId) return toast('warning', '先选择旁白或兜底音色');
         try {
             await synthesizeAndPlayPreview({ idx: 0, type: 'narration', speaker: null, text: '梨园试音，一切顺利。', voiceId, speed: 1, emotion: 'calm' });
@@ -1105,14 +1238,14 @@ function bindEvents() {
     $id('ph_extras').addEventListener('click', event => {
         const button = event.target.closest('[data-remove-extra]');
         if (!button) return;
-        const binding = settings.bindings?.[getCardKey()];
+        const binding = voiceProfile().bindings?.[getCardKey()];
         binding?.extras?.splice(Number(button.dataset.removeExtra), 1); clearRuntimeSpeakerMap(); saveSettings(); renderBindings();
     });
     $id('ph_add_voice').addEventListener('click', () => {
         const voiceId = $id('ph_voice_id').value.trim();
         if (!voiceId) return toast('warning', 'Voice ID 不能为空');
-        if (settings.voiceBank.some(voice => voice.voiceId === voiceId)) return toast('warning', '这个 Voice ID 已经在库里');
-        settings.voiceBank.push({ voiceId, label: $id('ph_voice_label').value.trim() || voiceId, gender: $id('ph_voice_gender').value, ageTag: $id('ph_voice_age').value, toneTag: $id('ph_voice_tone').value.trim() || 'unknown', note: $id('ph_voice_note').value.trim() });
+        if (voiceProfile().voiceBank.some(voice => voice.voiceId === voiceId)) return toast('warning', '这个 Voice ID 已经在库里');
+        voiceProfile().voiceBank.push({ voiceId, label: $id('ph_voice_label').value.trim() || voiceId, gender: $id('ph_voice_gender').value, ageTag: $id('ph_voice_age').value, toneTag: $id('ph_voice_tone').value.trim() || 'unknown', note: $id('ph_voice_note').value.trim() });
         for (const id of ['ph_voice_id', 'ph_voice_label', 'ph_voice_note']) $id(id).value = '';
         $id('ph_voice_tone').value = 'unknown';
         saveSettings(); renderSettings(); toast('success', '音色已加入');
@@ -1138,29 +1271,29 @@ function bindEvents() {
         const preview = event.target.closest('[data-preview-voice]');
         const remove = event.target.closest('[data-remove-voice]');
         if (preview) {
-            const voice = settings.voiceBank[Number(preview.dataset.previewVoice)];
+            const voice = voiceProfile().voiceBank[Number(preview.dataset.previewVoice)];
             try {
                 await synthesizeAndPlayPreview({ idx: 0, type: 'dialogue', speaker: voice.label, text: '你好，这是梨园音色试听。', voiceId: voice.voiceId, speed: 1, emotion: 'calm' });
             } catch (error) { toast('error', error.message); }
         }
         if (remove) {
-            const voice = settings.voiceBank[Number(remove.dataset.removeVoice)];
-            settings.voiceBank.splice(Number(remove.dataset.removeVoice), 1);
-            for (const pool of Object.values(settings.fuzzyPools)) while (pool.includes(voice.voiceId)) pool.splice(pool.indexOf(voice.voiceId), 1);
-            if (settings.narratorVoiceId === voice.voiceId) settings.narratorVoiceId = '';
-            if (settings.fallbackVoiceId === voice.voiceId) settings.fallbackVoiceId = '';
+            const voice = voiceProfile().voiceBank[Number(remove.dataset.removeVoice)];
+            voiceProfile().voiceBank.splice(Number(remove.dataset.removeVoice), 1);
+            for (const pool of Object.values(voiceProfile().fuzzyPools)) while (pool.includes(voice.voiceId)) pool.splice(pool.indexOf(voice.voiceId), 1);
+            if (voiceProfile().narratorVoiceId === voice.voiceId) voiceProfile().narratorVoiceId = '';
+            if (voiceProfile().fallbackVoiceId === voice.voiceId) voiceProfile().fallbackVoiceId = '';
             clearRuntimeSpeakerMap(); saveSettings(); renderSettings();
         }
     });
     $id('ph_pool_fields').addEventListener('change', event => {
         const select = event.target.closest('[data-pool]');
         if (!select) return;
-        settings.fuzzyPools[select.dataset.pool] = [...select.selectedOptions].map(option => option.value);
+        voiceProfile().fuzzyPools[select.dataset.pool] = [...select.selectedOptions].map(option => option.value);
         clearRuntimeSpeakerMap(); saveSettings();
     });
     $id('ph_save_voice_defaults').addEventListener('click', () => { persistVoiceDefaults(); saved('自动分组池'); });
-    $id('ph_narrator').addEventListener('change', event => { settings.narratorVoiceId = event.target.value; saveSettings(); });
-    $id('ph_fallback').addEventListener('change', event => { settings.fallbackVoiceId = event.target.value; saveSettings(); });
+    $id('ph_narrator').addEventListener('change', event => { voiceProfile().narratorVoiceId = event.target.value; saveSettings(); });
+    $id('ph_fallback').addEventListener('change', event => { voiceProfile().fallbackVoiceId = event.target.value; saveSettings(); });
     $id('ph_cache_enabled').addEventListener('change', async event => { settings.cache.enabled = event.target.checked; cache.enabled = settings.cache.enabled; if (cache.enabled && !cache.db) await cache.init(); await updateCacheUsage(); saveSettings(); });
     $id('ph_cache_max').addEventListener('change', event => { settings.cache.maxMB = clamp(event.target.value, 10, 2000, 200); cache.maxMB = settings.cache.maxMB; void cache.evict(); saveSettings(); });
     $id('ph_cache_cleanup_mode').addEventListener('change', () => { renderCacheCleanupMode(); persistCacheForm(); });
@@ -1219,6 +1352,7 @@ function exportSettings() {
     const safe = JSON.parse(JSON.stringify(settings));
     for (const preset of safe.apiPresets) preset.apiKey = '';
     safe.tts.apiKey = '';
+    safe.tts.elevenlabs.apiKey = '';
     const blob = new Blob([`// 梨园配置分享包：API Key 已清空，请导入后自行填写。\n${JSON.stringify(safe, null, 2)}`], { type: 'application/json' });
     const href = URL.createObjectURL(blob);
     const anchor = document.createElement('a');
@@ -1252,11 +1386,32 @@ async function importSettings(event) {
         settings.theme = ['follow', 'light', 'dark'].includes(incoming.theme) ? incoming.theme : settings.theme;
         settings.gapMs = { ...settings.gapMs, ...(incoming.gapMs ?? {}) };
         settings.cache = { ...settings.cache, ...(incoming.cache ?? {}) };
-        settings.tts = { ...settings.tts, ...(incoming.tts ?? {}), apiKey: settings.tts.apiKey };
+        const minimaxKey = settings.tts.apiKey;
+        const elevenKey = settings.tts.elevenlabs.apiKey;
+        settings.tts = {
+            ...settings.tts, ...(incoming.tts ?? {}), apiKey: minimaxKey,
+            provider: incoming.tts?.provider === 'elevenlabs' ? 'elevenlabs' : settings.tts.provider,
+            elevenlabs: {
+                ...settings.tts.elevenlabs, ...(incoming.tts?.elevenlabs ?? {}), apiKey: elevenKey,
+            },
+        };
         settings.bindings = { ...settings.bindings, ...(incoming.bindings ?? {}) };
         settings.fuzzyPools = { ...settings.fuzzyPools, ...(incoming.fuzzyPools ?? {}) };
         if (incoming.narratorVoiceId) settings.narratorVoiceId = incoming.narratorVoiceId;
         if (incoming.fallbackVoiceId) settings.fallbackVoiceId = incoming.fallbackVoiceId;
+        const incomingEleven = incoming.elevenLabsVoices ?? {};
+        const existingEleven = settings.elevenLabsVoices;
+        const elevenBank = new Map(existingEleven.voiceBank.map(voice => [voice.voiceId, voice]));
+        for (const voice of incomingEleven.voiceBank ?? []) if (voice?.voiceId && !elevenBank.has(voice.voiceId)) elevenBank.set(voice.voiceId, voice);
+        settings.elevenLabsVoices = {
+            ...existingEleven,
+            voiceBank: [...elevenBank.values()],
+            fuzzyPools: { ...existingEleven.fuzzyPools, ...(incomingEleven.fuzzyPools ?? {}) },
+            bindings: { ...existingEleven.bindings, ...(incomingEleven.bindings ?? {}) },
+            narratorVoiceId: incomingEleven.narratorVoiceId || existingEleven.narratorVoiceId,
+            fallbackVoiceId: incomingEleven.fallbackVoiceId || existingEleven.fallbackVoiceId,
+        };
+        clearRuntimeSpeakerMap();
         player.setBackgroundEnabled(settings.backgroundPlayback);
         player.setGaps(settings.gapMs);
         player.setMode(settings.narrationMode);
@@ -1317,8 +1472,7 @@ async function init() {
     renderPlayer();
     messageObserver = new MutationObserver(addAllMessageButtons);
     messageObserver.observe($id('chat'), { childList: true, subtree: true });
-    console.info('[梨园·PlayHouse] v0.3.1 已加载');
+    console.info('[梨园·PlayHouse] v0.6.0 已加载');
 }
 
 jQuery(init);
-
