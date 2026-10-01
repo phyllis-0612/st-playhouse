@@ -49,6 +49,9 @@ export const ELEVENLABS_MODELS = Object.freeze([
 export const ELEVENLABS_AUDIO_TAGS = Object.freeze([
     'whispers', 'mischievously', 'sarcastic', 'excited', 'sad', 'angry',
     'crying', 'laughs', 'sighs', 'exhales', 'gasps', 'chuckles',
+    'warmly', 'gently', 'reassuring', 'curious', 'thoughtful', 'hesitant',
+    'nervous', 'happy', 'surprised', 'annoyed', 'calm', 'shouts',
+    'slowly', 'rushed', 'short pause', 'clears throat',
 ]);
 
 export function supportsElevenLabsTags(model) {
@@ -87,7 +90,7 @@ export const SPEECH_28_SOUND_TAGS = Object.freeze([
     'sneezes',
 ]);
 
-export const DIRECTOR_SCHEMA_VERSION = 6;
+export const DIRECTOR_SCHEMA_VERSION = 7;
 export const VOICE_CATALOG_VERSION = 3;
 
 export function supportsSpeech28SoundTags(model) {
