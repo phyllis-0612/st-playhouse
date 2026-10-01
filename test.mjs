@@ -136,6 +136,32 @@ assert.deepEqual(Object.keys(elevenBody.voice_settings).sort(), ['similarity_boo
 assert.equal(elevenBody.voice_setting, undefined);
 assert.equal(elevenBody.emotion, undefined);
 assert.equal(buildTtsBody(elevenDirected[0], { ...activeTtsSettings(dualSettings), model: 'eleven_multilingual_v2' }).text, '你好。');
+// A delivery change must land at its original-text anchor and survive the TTS safety check.
+const turningLine = '逗你的。放心，我会陪你。';
+const turningDirection = normalizeDirectorResult([{ idx: 0, type: 'dialogue', text: turningLine }], [{
+    idx: 0, type: 'dialogue', speaker: '楚弥', deliveryTag: 'mischievously',
+    effects: [{ tag: 'reassuring', position: 'before', anchor: '放心' }],
+    text: '模型擅自改写的台词',
+}], { provider: 'elevenlabs', ttsModel: 'eleven_v4' })[0];
+assert.equal(turningDirection.text, turningLine);
+for (const model of ['eleven_v4', 'eleven_v4_turbo', 'eleven_v3']) {
+    assert.equal(buildTtsBody(turningDirection, { ...activeTtsSettings(dualSettings), model }).text,
+        '[mischievously] 逗你的。[reassuring]放心，我会陪你。');
+}
+for (const model of ['eleven_multilingual_v2', 'eleven_flash_v2_5']) {
+    assert.equal(buildTtsBody(turningDirection, { ...activeTtsSettings(dualSettings), model }).text, turningLine);
+}
+const thoughtfulDirection = normalizeDirectorResult([{ idx: 0, type: 'dialogue', text: '我想想。也许可以。' }], [{
+    idx: 0, type: 'dialogue', deliveryTag: 'thoughtful', effects: [
+        { tag: 'short pause', position: 'before', anchor: '也许' },
+        { tag: 'gunshot', position: 'before', anchor: '也许' },
+        { tag: 'shouts', position: 'before', anchor: '不存在的锚点' },
+    ],
+}], { provider: 'elevenlabs', ttsModel: 'eleven_v4' })[0];
+assert.equal(buildTtsBody(thoughtfulDirection, activeTtsSettings(dualSettings)).text,
+    '[thoughtful] 我想想。[short pause]也许可以。');
+assert.equal(buildTtsBody({ ...turningDirection, ttsText: '被篡改的正文' }, activeTtsSettings(dualSettings)).text,
+    `[mischievously] ${turningLine}`);
 assert.equal(buildElevenLabsUrl(activeTtsSettings(dualSettings), 'eleven-voice'), 'https://api.elevenlabs.io/v1/text-to-speech/eleven-voice?output_format=mp3_44100_128');
 try {
     globalThis.fetch = async (url, options) => {
