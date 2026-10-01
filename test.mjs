@@ -2,8 +2,8 @@ import assert from 'node:assert/strict';
 import { extractTaggedContent, parseContentTags, segmentText } from './src/segmenter.js';
 import { __test as directorTest, applySoundEffects, directSegments, normalizeDirectorResult } from './src/director.js';
 import { applyVoices, clearRuntimeSpeakerMap } from './src/voicebank.js';
-import { cloneDefaults, EMOTIONS, emotionOptionsForModel, mergeDefaultVoiceCatalog, normalizeTtsEmotion, SPEECH_28_SOUND_TAGS, VOICE_CATALOG_VERSION } from './src/constants.js';
-import { buildTtsBody, buildTtsUrl, classifyTtsError, TtsService } from './src/tts.js';
+import { activeTtsSettings, activeVoiceProfile, cloneDefaults, EMOTIONS, emotionOptionsForModel, mergeDefaultVoiceCatalog, normalizeTtsEmotion, SPEECH_28_SOUND_TAGS, VOICE_CATALOG_VERSION } from './src/constants.js';
+import { buildElevenLabsUrl, buildTtsBody, buildTtsUrl, classifyTtsError, ElevenLabsAdapter, TtsService } from './src/tts.js';
 import { buildCloneBody, buildCloneUrl, validateCloneFile, validateVoiceId } from './src/voiceclone.js';
 import { joinApiUrl } from './src/utils.js';
 import { readFile } from 'node:fs/promises';
@@ -105,6 +105,61 @@ try {
 }
 
 const settings = cloneDefaults();
+const dualSettings = cloneDefaults();
+dualSettings.elevenLabsVoices.voiceBank.push({ voiceId: 'eleven-voice', label: '如鸽', toneTag: 'warm' });
+dualSettings.elevenLabsVoices.fallbackVoiceId = 'eleven-voice';
+dualSettings.elevenLabsVoices.fuzzyPools.unknown = ['eleven-voice'];
+dualSettings.tts.elevenlabs.apiKey = 'eleven-test-key';
+assert.equal(activeVoiceProfile(dualSettings).voiceBank.length, settings.voiceBank.length);
+dualSettings.tts.provider = 'elevenlabs';
+assert.equal(activeTtsSettings(dualSettings).model, 'eleven_v4');
+assert.equal(activeTtsSettings(dualSettings).apiKey, 'eleven-test-key');
+assert.equal(activeVoiceProfile(dualSettings).voiceBank.length, 1);
+clearRuntimeSpeakerMap();
+assert.equal(applyVoices([{ type: 'dialogue', speaker: '楚弥', voiceOverride: 'female-shaonv' }], dualSettings, 'card')[0].voiceId, 'eleven-voice');
+dualSettings.elevenLabsVoices.bindings.card = { main: { speaker: '楚弥', voiceId: 'eleven-voice' }, extras: [], narrator: '' };
+assert.equal(applyVoices([{ type: 'dialogue', speaker: '楚弥' }], dualSettings, 'card')[0].voiceId, 'eleven-voice');
+const elevenPrompt = directorTest.directorPrompt(['楚弥'], 'eleven_v4', 'elevenlabs');
+assert.match(elevenPrompt, /方括号表演标签/);
+assert.match(elevenPrompt, /deliveryTag/);
+assert.doesNotMatch(elevenPrompt, /Speech 2.8 拟声标签/);
+const elevenDirected = normalizeDirectorResult([{ idx: 0, type: 'dialogue', text: '你好。' }], [{
+    idx: 0, speaker: '楚弥', type: 'dialogue', emotion: 'sad', deliveryTag: 'whispers',
+    effects: [{ tag: 'sighs', position: 'before', anchor: '你好' }, { tag: 'gunshot', position: 'after', anchor: '你好' }],
+}], { ttsModel: 'eleven_v4', provider: 'elevenlabs' });
+assert.equal(elevenDirected[0].ttsText, '[sighs]你好。');
+assert.equal(elevenDirected[0].deliveryTag, 'whispers');
+const elevenBody = buildTtsBody(elevenDirected[0], activeTtsSettings(dualSettings));
+assert.equal(elevenBody.text, '[whispers] [sighs]你好。');
+assert.equal(elevenBody.model_id, 'eleven_v4');
+assert.deepEqual(Object.keys(elevenBody.voice_settings).sort(), ['similarity_boost', 'stability']);
+assert.equal(elevenBody.voice_setting, undefined);
+assert.equal(elevenBody.emotion, undefined);
+assert.equal(buildTtsBody(elevenDirected[0], { ...activeTtsSettings(dualSettings), model: 'eleven_multilingual_v2' }).text, '你好。');
+assert.equal(buildElevenLabsUrl(activeTtsSettings(dualSettings), 'eleven-voice'), 'https://api.elevenlabs.io/v1/text-to-speech/eleven-voice?output_format=mp3_44100_128');
+try {
+    globalThis.fetch = async (url, options) => {
+        assert.match(url, /eleven-voice/);
+        assert.equal(options.headers['xi-api-key'], 'eleven-test-key');
+        assert.equal(JSON.parse(options.body).text, '你好。');
+        return new Response(new Uint8Array([1, 2, 3]), { status: 200, headers: { 'Content-Type': 'audio/mpeg' } });
+    };
+    const audio = await new ElevenLabsAdapter(activeTtsSettings(dualSettings)).synthesize({ text: '你好。', voiceId: 'eleven-voice' });
+    assert.equal(audio.type, 'audio/mpeg');
+    assert.equal(audio.size, 3);
+    const memory = new Map();
+    const cache = { get: async key => memory.get(key), put: async (key, blob) => memory.set(key, blob) };
+    const elevenService = new TtsService(activeTtsSettings(dualSettings), cache, { retryDelays: [] });
+    const elevenKey = await elevenService.keyFor({ text: '你好。', voiceId: 'eleven-voice' });
+    assert.notEqual(elevenKey, await new TtsService(dualSettings.tts, cache, { retryDelays: [] }).keyFor({ text: '你好。', voiceId: 'eleven-voice' }));
+    assert.notEqual(elevenKey, await new TtsService({ ...activeTtsSettings(dualSettings), stability: 0.9 }, cache).keyFor({ text: '你好。', voiceId: 'eleven-voice' }));
+    globalThis.fetch = async () => new Response(JSON.stringify({ detail: { message: 'quota_exceeded' } }), {
+        status: 429, headers: { 'Content-Type': 'application/json' },
+    });
+    await assert.rejects(new ElevenLabsAdapter(activeTtsSettings(dualSettings)).synthesize({ text: '你好。', voiceId: 'eleven-voice' }), error => error.kind === 'quota' && !error.retryable);
+} finally {
+    globalThis.fetch = originalFetch;
+}
 assert.equal(settings.tts.model, 'speech-2.8-hd');
 assert.equal(settings.voiceCatalogVersion, VOICE_CATALOG_VERSION);
 assert.ok(settings.voiceBank.length >= 30);
@@ -277,7 +332,11 @@ assert.match(indexSource, /async function synthesizeAndPlayPreview\(segment\)/);
 assert.match(indexSource, /if \(page === 'read'\) restoreReadingQueue\(\)/);
 assert.match(indexSource, /readingQueueSnapshot \|\|= \{ cursor: player\.cursor, mode: player\.mode \}/);
 assert.doesNotMatch(indexSource, /currentSegments = \[(?:result|sample)\]/);
-assert.match(indexSource, /buildTtsBody\(item, settings\.tts\)/);
+assert.match(indexSource, /buildTtsBody\(item, ttsSettings\(\)\)/);
+assert.match(indexSource, /safe\.tts\.elevenlabs\.apiKey = ''/);
+assert.match(indexSource, /ttsProvider: tts\.provider/);
+assert.match(panelSource, /ph_tts_provider/);
+assert.match(panelSource, /ph_import_eleven_voices/);
 assert.match(indexSource, /data-cue-emotion/);
 assert.match(indexSource, /data-cue-speed/);
 assert.match(indexSource, /stored\.manualParameters/);
