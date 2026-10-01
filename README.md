@@ -1,4 +1,4 @@
-# 梨园·PlayHouse v0.6.0
+# 梨园·PlayHouse v0.6.1
 
 署名：克克姐&奶盖&鱼仔
 
@@ -27,6 +27,7 @@ SillyTavern/public/scripts/extensions/third-party/st-playhouse/
 
 - 语音服务选 ElevenLabs，填入官方 API Base URL `https://api.elevenlabs.io` 与 API Key。音色页可点“从 ElevenLabs 获取我的音色”；导入后确认兜底和旁白音色。MiniMax 的音色、分组池及角色绑定独立保留。
 - Eleven v4 / v4 Turbo / v3 的分轨规则会根据模型切换为方括号表演标签，且只插入白名单标签、使用原文唯一短语作锚点；没有可靠依据不插入。Multilingual v2 / Flash v2.5 不插入表演标签。
+- 分轨会结合说话意图选择温和、安抚、好奇、犹豫等语气；段首最多 1 个主要标签，段中最多 2 个语气转折、人声反应或必要停顿标签。原文与标点不改写，旁白不模仿角色的哭笑，标签不要求改变音色。同一角色相邻段保持表达连续，每段独立合成时重新带上需要延续的语气。
 - Eleven v4 只发送 Stability 与 Similarity，节奏通过标点及标签引导；其他 ElevenLabs 模型可发送 0.7–1.2 的 speed。响应按 MP3 音频读取。
 - ElevenLabs 音色克隆请先在 ElevenLabs 账号中完成，再用“获取我的音色”同步或手动录入 Voice ID。
 - 切换语音服务或模型后重新分轨；旧服务已存的分轨不会套用到新服务。音频缓存按服务、模型、请求参数和音色隔离。
@@ -134,4 +135,3 @@ iOS Safari、无痕模式或长期不访问站点可能清理缓存，这是浏�
 - iOS 锁屏或切后台后播放可能暂停，无稳定锁屏控制。
 - 无法检测 iPhone/iPad 的硬件静音键状态。
 - 当前不包含整章预生成、合并导出单文件、用户消息朗读，也不提供 MiniMax 账号内音色删除功能。
-
