@@ -1,5 +1,5 @@
 import { joinApiUrl, sha1 } from './utils.js';
-import { normalizeTtsEmotion, SPEECH_28_SOUND_TAGS, supportsSpeech28SoundTags } from './constants.js';
+import { ELEVENLABS_AUDIO_TAGS, normalizeTtsEmotion, SPEECH_28_SOUND_TAGS, supportsElevenLabsTags, supportsSpeech28SoundTags } from './constants.js';
 import { applySoundEffects } from './director.js';
 
 class Semaphore {
@@ -47,13 +47,15 @@ function wait(ms, signal) {
     });
 }
 
-export function classifyTtsError({ httpStatus = 0, statusCode = 0, message = '' } = {}) {
+export function classifyTtsError({ httpStatus = 0, statusCode = 0, message = '', provider = 'minimax' } = {}) {
     const text = String(message).toLowerCase();
     const code = Number(statusCode) || 0;
     const http = Number(httpStatus) || 0;
     let kind = 'request';
     let retryable = false;
-    if (!http && !code && /network|fetch|load failed|连接|网络|timeout|超时/.test(text)) {
+    if (provider === 'elevenlabs' && /quota|credit|subscription|balance|额度|余额/.test(text)) {
+        kind = 'quota';
+    } else if (!http && !code && /network|fetch|load failed|连接|网络|timeout|超时/.test(text)) {
         kind = 'network'; retryable = true;
     } else if (http === 408 || code === 1001 || /timeout|超时/.test(text)) {
         kind = 'timeout'; retryable = true;
@@ -74,6 +76,11 @@ export function classifyTtsError({ httpStatus = 0, statusCode = 0, message = '' 
         network: '网络连接失败', timeout: '请求超时', rate_limit: '请求过于频繁', server: 'MiniMax 服务暂时异常',
         auth: 'MiniMax 密钥或权限无效', quota: 'MiniMax 额度或用量受限', voice: '音色不可用', safety: '内容未通过审核', request: '语音合成失败',
     };
+    if (provider === 'elevenlabs') {
+        labels.server = 'ElevenLabs 服务暂时异常';
+        labels.auth = 'ElevenLabs 密钥或权限无效';
+        labels.quota = 'ElevenLabs 额度或用量受限';
+    }
     return { kind, retryable, label: labels[kind], httpStatus: http, statusCode: code, rawMessage: String(message || '') };
 }
 
@@ -102,6 +109,7 @@ export function effectiveTtsText(segment, model) {
 }
 
 export function buildTtsBody(segment, settings) {
+    if (settings.provider === 'elevenlabs') return buildElevenLabsBody(segment, settings);
     const model = settings.model || 'speech-2.8-hd';
     const speed = Math.min(2, Math.max(0.5, Number(segment.speed || 1) * Number(settings.globalSpeed || 1)));
     const pitch = 0;
@@ -122,6 +130,66 @@ export function buildTtsBody(segment, settings) {
         voice_setting: voiceSetting,
         audio_setting: { format: 'mp3', sample_rate: 32000, bitrate: 128000, channel: 1 },
     };
+}
+
+export function effectiveElevenLabsText(segment, model) {
+    const original = String(segment.text ?? '');
+    if (!supportsElevenLabsTags(model)) return original;
+    const tags = new Set(ELEVENLABS_AUDIO_TAGS);
+    const candidate = typeof segment.ttsText === 'string'
+        ? segment.ttsText : applySoundEffects(original, segment.effects, 'elevenlabs');
+    const pattern = new RegExp(`\\[(?:${ELEVENLABS_AUDIO_TAGS.join('|')})\\]`, 'g');
+    const safe = candidate.replace(pattern, '') === original ? candidate : original;
+    return tags.has(segment.deliveryTag) ? `[${segment.deliveryTag}] ${safe}` : safe;
+}
+
+export function buildElevenLabsBody(segment, settings) {
+    const model = settings.model || 'eleven_v4';
+    const voiceSettings = {
+        stability: Math.min(1, Math.max(0, Number(settings.stability ?? 0.5))),
+        similarity_boost: Math.min(1, Math.max(0, Number(settings.similarityBoost ?? 0.75))),
+    };
+    // Eleven v4 only exposes stability and similarity; pace is directed by tags and punctuation.
+    if (!['eleven_v4', 'eleven_v4_turbo'].includes(model)) {
+        voiceSettings.speed = Math.min(1.2, Math.max(0.7, Number(segment.speed || 1) * Number(settings.globalSpeed || 1)));
+    }
+    return { text: effectiveElevenLabsText(segment, model), model_id: model, voice_settings: voiceSettings };
+}
+
+export function buildElevenLabsUrl(settings, voiceId) {
+    if (!voiceId || /[^\w-]/.test(voiceId)) throw new Error('ElevenLabs Voice ID 无效');
+    const url = new URL(joinApiUrl(settings.baseUrl || 'https://api.elevenlabs.io', `/v1/text-to-speech/${encodeURIComponent(voiceId)}`));
+    url.searchParams.set('output_format', settings.outputFormat || 'mp3_44100_128');
+    return url.href;
+}
+
+export class ElevenLabsAdapter {
+    constructor(settings) { this.settings = settings; }
+    async synthesize(segment, { signal } = {}) {
+        if (!this.settings.apiKey) throw new Error('请先填写 ElevenLabs API Key');
+        if (!segment.voiceId) throw new Error(`「${segment.speaker || '旁白'}」没有可用音色`);
+        let response;
+        try {
+            response = await fetch(buildElevenLabsUrl(this.settings, segment.voiceId), {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'xi-api-key': this.settings.apiKey, Accept: 'audio/mpeg' },
+                body: JSON.stringify(buildElevenLabsBody(segment, this.settings)),
+                signal,
+            });
+        } catch (error) {
+            if (error.name === 'AbortError') throw error;
+            throw ttsError(error.message || '浏览器无法连接 ElevenLabs', { provider: 'elevenlabs' });
+        }
+        if (!response.ok) {
+            const payload = await response.json().catch(() => null);
+            const detail = payload?.detail;
+            const message = typeof detail === 'string' ? detail : detail?.message || payload?.error?.message || `HTTP ${response.status}`;
+            throw ttsError(message, { httpStatus: response.status, provider: 'elevenlabs' });
+        }
+        const blob = await response.blob();
+        if (!blob.size) throw ttsError('ElevenLabs 没有返回有效音频', { provider: 'elevenlabs' });
+        return new Blob([blob], { type: 'audio/mpeg' });
+    }
 }
 
 function hexToBlob(hex) {
@@ -162,7 +230,7 @@ export class TtsService {
     constructor(settings, cache, options = {}) {
         this.settings = settings;
         this.cache = cache;
-        this.adapter = new MiniMaxAdapter(settings);
+        this.adapter = settings.provider === 'elevenlabs' ? new ElevenLabsAdapter(settings) : new MiniMaxAdapter(settings);
         this.semaphore = new Semaphore(settings.concurrency);
         this.effectiveConcurrency = this.semaphore.limit;
         this.retryDelays = options.retryDelays ?? RETRY_DELAYS;
@@ -170,16 +238,21 @@ export class TtsService {
 
     async keyFor(segment) {
         const body = buildTtsBody(segment, this.settings);
-        return sha1([
-            body.text,
-            segment.voiceId,
-            body.voice_setting.speed,
-            body.voice_setting.pitch,
-            body.voice_setting.emotion,
-            body.model,
-            this.settings.baseUrl || '',
-            this.settings.groupId || '',
-        ].join('\u241f'));
+        if (this.settings.provider !== 'elevenlabs') {
+            return sha1([
+                body.text, segment.voiceId, body.voice_setting.speed, body.voice_setting.pitch,
+                body.voice_setting.emotion, body.model, this.settings.baseUrl || '',
+                this.settings.groupId || '',
+            ].join('\u241f'));
+        }
+        return sha1(JSON.stringify({
+            provider: this.settings.provider || 'minimax',
+            baseUrl: this.settings.baseUrl,
+            groupId: this.settings.groupId,
+            outputFormat: this.settings.outputFormat,
+            voiceId: segment.voiceId,
+            body,
+        }));
     }
 
     reduceConcurrency() {
