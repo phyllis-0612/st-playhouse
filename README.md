@@ -1,8 +1,8 @@
-# 梨园·PlayHouse v0.5.4
+# 梨园·PlayHouse v0.6.0
 
 署名：克克姐&奶盖&鱼仔
 
-SillyTavern 正文分轨朗读扩展。AI 消息生成结束后，本地先按引号和动作标记切分原文，再让便宜的 OpenAI 兼容模型只标注「旁白 / 角色 / 情绪 / 语速」，最后按角色分别调用 MiniMax 合成并顺序播放。
+SillyTavern 正文分轨朗读扩展。AI 消息生成结束后，本地先按引号和动作标记切分原文，再让便宜的 OpenAI 兼容模型只标注「旁白 / 角色 / 情绪 / 语速」，最后按角色分别调用所选的 MiniMax 或 ElevenLabs 合成并顺序播放。
 
 ## 安装
 
@@ -18,10 +18,18 @@ SillyTavern/public/scripts/extensions/third-party/st-playhouse/
 
 1. 设置 → 朗读：确认正文标签，点击保存。默认只读取 `<content>…</content>`；可用逗号填写多个自定义候选标签。
 2. 设置 → 分轨模型：填写 OpenAI 兼容 Base URL、API Key，点击「拉取模型」后从下拉框选择并保存。也可选择「手动填写」。
-3. 设置 → 语音服务：填写 MiniMax Base URL 和 API Key，选择语音模型后保存。默认 `speech-2.8-hd`；现行 MiniMax 接口可不填 GroupId，旧中转要求时再填。
-4. 音色 → 音色库：手填官方/已有 `voice_id`，或直接上传录音克隆新音色。
-5. 选择全局旁白、兜底音色，并配置自动分组池。
+3. 设置 → 语音服务：先选择 MiniMax 或 ElevenLabs，两套 API Key、地址和模型分别保存。MiniMax 默认 `speech-2.8-hd`；ElevenLabs 默认 `eleven_v4`，可设置 Stability 与 Similarity。
+4. 音色 → 音色库：MiniMax 可手填或上传录音克隆；ElevenLabs 可从账号拉取已有音色，也可手填 `voice_id`。
+5. 为当前语音服务选择旁白、兜底音色，并配置自动分组池。切换服务后显示对应音色与角色绑定。
 6. 给当前角色卡绑定主角、旁白和常驻配角音色。
+
+## ElevenLabs 使用
+
+- 语音服务选 ElevenLabs，填入官方 API Base URL `https://api.elevenlabs.io` 与 API Key。音色页可点“从 ElevenLabs 获取我的音色”；导入后确认兜底和旁白音色。MiniMax 的音色、分组池及角色绑定独立保留。
+- Eleven v4 / v4 Turbo / v3 的分轨规则会根据模型切换为方括号表演标签，且只插入白名单标签、使用原文唯一短语作锚点；没有可靠依据不插入。Multilingual v2 / Flash v2.5 不插入表演标签。
+- Eleven v4 只发送 Stability 与 Similarity，节奏通过标点及标签引导；其他 ElevenLabs 模型可发送 0.7–1.2 的 speed。响应按 MP3 音频读取。
+- ElevenLabs 音色克隆请先在 ElevenLabs 账号中完成，再用“获取我的音色”同步或手动录入 Voice ID。
+- 切换语音服务或模型后重新分轨；旧服务已存的分轨不会套用到新服务。音频缓存按服务、模型、请求参数和音色隔离。
 
 ## 音色克隆
 
@@ -96,7 +104,7 @@ MiniMax 中国区的声音复刻要求账号完成个人或企业认证。克隆
 
 ## 缓存
 
-音频以 segment 为粒度存入 IndexedDB，key 由实际送入的正文（含合法拟声标签）、voice_id、语速、音高、情绪、模型与服务地址计算。超过容量按 LRU 淘汰。IndexedDB 不可用时自动降级为无缓存，不影响朗读。
+音频以 segment 为粒度存入 IndexedDB，key 由所选语音服务、实际请求正文与参数、voice_id、模型及服务地址计算。超过容量按 LRU 淘汰。IndexedDB 不可用时自动降级为无缓存，不影响朗读。
 
 设置页可以手动按条件清理缓存：按合成日期只保留最近若干天，或按 LRU 清理到指定容量；也可以清空全部音频缓存。按日期清理使用首次合成时间，播放旧缓存不会重置其保留期限。
 
@@ -119,7 +127,7 @@ iOS Safari、无痕模式或长期不访问站点可能清理缓存，这是浏�
 
 ## 配置分享
 
-导出功能会把所有分轨 API Key 和 MiniMax API Key 清空。导入时合并而非覆盖，音色库按 `voice_id` 去重。
+导出功能会把所有分轨、MiniMax 和 ElevenLabs API Key 清空。导入时分别合并两家服务的音色库，并按 `voice_id` 去重。
 
 ## 已知限制
 
