@@ -193,15 +193,27 @@ function directorPrompt(knownSpeakers, ttsModel = '', provider = 'minimax') {
         'intensity 和 pace 必须结合整场气氛、标点、动作和情绪转折克制选择。相邻段落没有明确转折时保持连续，不要忽快忽慢。',
         '同一角色在同一条消息内，pace 应保持一致，除非该段有明确的情绪转折标点（感叹号、省略号、问号连用）或动作描写表明语气骤变。无明确转折时沿用该角色在本消息内的首段 pace。',
         eleven
-            ? '不要输出 pitch、pitchDirection、timbre 或 voiceId。ElevenLabs 不接收 MiniMax 的 emotion/pitch 字段；只用合法方括号标签引导表演，避免过度标记。'
+            ? '不要输出 pitch、pitchDirection、timbre 或 voiceId。保持所选音色的自然声音，不要求变成低沉、沙哑、御姐、萝莉或其他声线，不添加口音。ElevenLabs 的 emotion、intensity 只是分析元数据，不会自动变成表演控制；需要听见的语气必须明确落实到 deliveryTag 或 effects。'
             : '音高由梨园固定以保持同一角色音色稳定。不要输出 pitch、pitchDirection、timbre 或 voiceId；你只设计情绪、强度、语速和合法拟声。',
         '旁白以讲述清晰和气氛连续为先，角色台词才突出人物情绪。无法判断时沿用 scene.pace，emotionConfidence=low、intensity=1、effects=[]。',
     ];
     if (eleven && soundEffectsEnabled) {
         lines.push(
-            `当前语音模型 ${ttsModel} 支持 ElevenLabs 方括号表演标签。deliveryTag 只在本段确有明确表演依据时填写，且只能用：${ELEVENLABS_AUDIO_TAGS.join(', ')}；普通旁白与低置信度情绪留空。`,
-            'effects 每项格式为 {"tag":"标签","position":"before|after","anchor":"原文中唯一出现的连续短语"}；只能选同一白名单中实际发出的轻笑、叹气等声音。不要插入环境音，也不要凭气氛虚构声音；每段最多 2 个。',
-            'anchor 必须逐字复制原文中唯一出现的短语；不可靠就返回 effects=[]。原文和正文标点不能改写。',
+            `当前语音模型 ${ttsModel} 支持 ElevenLabs 方括号表演标签。所有 tag 和 deliveryTag 只能从此白名单精确选择，不带方括号、不写中文、不组合或自造标签：${ELEVENLABS_AUDIO_TAGS.join(', ')}。`,
+            '表演判断顺序：先确定谁在对谁说话，再判断说话意图（安抚、试探、打趣、追问、拒绝、催促等），最后结合本条消息中前后动作、台词与标点选择可听见的表达。场景情绪是背景，不要让同场每个角色都用同一种语气；动作可作依据，但不是都要变成声音。',
+            'deliveryTag 控制从本段开头开始的主要说话方式，最多 1 个。优先选择最能传达本句意图的标签，而非泛泛贴情绪。普通交流可以留空；语气明确时主动选用合适标签，不必等到极端情绪。不要给每个短句机械加标签，也不要为了填满字段制造表演。',
+            '语气参考：warmly=亲切温暖，gently=轻柔，reassuring=安抚，curious=真诚好奇，thoughtful=思索，hesitant=犹豫，nervous=紧张，happy=愉快，excited=兴奋，surprised=意外，annoyed=不耐烦，sad=难过，angry=愤怒，calm=平静，mischievously=俏皮打趣，sarcastic=明确讽刺，whispers=真正压低音量的耳语，shouts=明确喊叫。不要把亲密一律变成耳语、问句一律变成惊讶、玩笑一律变成讽刺、难过一律变成哭泣。',
+            'effects 既可标记段中语气转折，也可插入明确的人声反应或必要停顿。每项格式为 {"tag":"标签","position":"before|after","anchor":"本段原文中唯一出现的连续短语"}；每段合计最多 2 个。语气标签放在开始改变语气的词句之前；人声反应放在实际发生的位置，不能都堆在段首。',
+            '标签从插入点影响后续台词；只有表达真的改变才再切换。长句可在转折处换标签，转折前后优先使用相邻句的语义，不要逐词标记。同一句不要叠加冲突标签，同位置不要重复同一标签，也不要在句末才添加没有后续台词的语气指令。',
+            '人声反应参考：chuckles=轻笑，laughs=明显笑声，sighs=叹息，exhales=呼气，gasps=倒吸气，clears throat=清嗓；crying 表示确实在哭或带哭腔。只有正文明确描写正在出声，或台词强烈支持这一反应时使用；“微笑”“眼睛湿润”“心里松了口气”不自动生成笑声、哭声或叹息。反应标签放在 effects，不用作整段 deliveryTag。',
+            '节奏优先交给原文标点。slowly 只用于明确放慢、郑重或缓缓解释，rushed 只用于明确急促、催促或慌乱；不要把所有悲伤台词放慢或兴奋台词加速。short pause 仅在语义确有迟疑或转折且原标点不足时使用，不与省略号、句号等已有停顿重复；不要输出 SSML、停顿秒数或改标点。',
+            '相邻段落按同一角色的说话意图保持连续，只有新动作、语义转折或明确情绪变化才改变。每段会独立请求合成，标签不会从上一段继承；延续明确的说话方式时应在新段重新填写同一个 deliveryTag，但不要重复制造叹息、轻笑等反应。不要仅因重新分段就重新设计一种语气。',
+            '旁白保持自然讲述，不模仿被描述角色的哭喊、笑声或喘息，不把“她叹了口气”变成旁白本人叹气。低置信度时留空 deliveryTag 与 effects；保留原文文字和标点，不新增称呼、语气词、拟声词、对白归属说明或角色动作。',
+            'anchor 必须逐字复制本段原文中只出现一次的短语，不能引用其他段落。不可靠就省略该项；没有需要插入的标签时 effects=[]。以下示例只说明标签选择与位置，不作为实际输出，不复制示例台词。',
+            '例：她柔声安慰：“别怕，我在这里。” → 该对白 deliveryTag="reassuring"，effects=[]；温柔不必自动 whispers。',
+            '例：她压低声音说：“别让他们听见。” → 该对白 deliveryTag="whispers"，effects=[]；普通旁白不用跟着耳语。',
+            '例：她先打趣，后认真保证：“逗你的。放心，我会陪你。” → 该对白 deliveryTag="mischievously"，effects=[{"tag":"reassuring","position":"before","anchor":"放心"}]。',
+            '例：她叹了一声才说：“好吧，我答应你。” → 该对白 effects=[{"tag":"sighs","position":"before","anchor":"好吧"}]；单纯无奈不必使用 crying 或 angry。',
         );
     } else if (soundEffectsEnabled) {
         lines.push(
